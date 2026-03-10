@@ -15,6 +15,7 @@ from agents.timeline_agent import generate_timeline
 
 st.set_page_config(page_title="DeepSeek 高管研报", page_icon="🐳", layout="wide")
 
+# 🌟 全局状态机初始化
 if "report_ready" not in st.session_state:
     st.session_state.report_ready = False
     st.session_state.word_path = ""
@@ -66,66 +67,87 @@ with st.sidebar:
     file_name = st.text_input("文件名", f"高管研报_{datetime.date.today()}")
 
 st.title("🐳 企业情报探员 (高管视角·模块化版)")
-query_input = st.text_input("输入主题 (用 \\ 隔开)", "OpenAI \\ Anthropic")
 
-if st.button("🚀 开始极速提炼", type="primary"):
-    if not api_key or not tavily_key: st.error("请填入双引擎 API Key！")
-    else:
-        init_browser()
-        topics = [t.strip() for t in query_input.split('\\') if t.strip()]
-        all_deep_data = []
-        all_timeline_data = []
-        ai = AI_Driver(api_key, model_id)
-        current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
-        global_seen_titles = []
+# =====================================================================
+# 🌟 状态机分支 1：探索态（未生成报告时显示）
+# =====================================================================
+if not st.session_state.report_ready:
+    query_input = st.text_input("输入主题 (用 \\ 隔开)", "OpenAI \\ Anthropic")
 
-        for topic in topics:
-            st.markdown(f"#### 🔵 追踪目标: 【{topic}】")
-            
-            with st.spinner(f"正在全网嗅探 20 条关键简讯..."):
-                raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
-            
-            if not raw_results: 
-                st.warning(f"⚠️ {topic}：近期极度安静，无情报。")
-                continue
-            
-            # 🌟 新功能：利用自带摘要，极速生成时间线！
-            with st.spinner("正在为高管梳理【核心时间线】..."):
-                timeline_events = generate_timeline(ai, raw_results, topic, current_date_str)
-                if timeline_events:
-                    all_timeline_data.append({"topic": topic, "events": timeline_events})
-                    st.success(f"✅ 生成 {len(timeline_events)} 条核心时间线。")
+    if st.button("🚀 开始极速提炼", type="primary"):
+        if not api_key or not tavily_key: 
+            st.error("请填入双引擎 API Key！")
+        else:
+            init_browser()
+            topics = [t.strip() for t in query_input.split('\\') if t.strip()]
+            all_deep_data = []
+            all_timeline_data = []
+            ai = AI_Driver(api_key, model_id)
+            current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
+            global_seen_titles = []
 
-            st.write(f"🔍 提取排名前 10 的深度网页，启动强力爬虫解析正文...")
-            urls_to_scrape = [r['url'] for r in raw_results][:10]
-            
-            with st.spinner("正在并发抓取并进行底层商战分析..."):
-                full_text_data, valid_count = safe_run_async_crawler(urls=urls_to_scrape)
-                final_news_list = map_reduce_analysis(ai, topic, full_text_data, current_date_str, time_opt)
+            for topic in topics:
+                st.markdown(f"#### 🔵 追踪目标: 【{topic}】")
                 
-                if final_news_list:
-                    deduped_news = []
-                    for news in final_news_list:
-                        if not any(difflib.SequenceMatcher(None, news.title, s).ratio() > 0.6 for s in global_seen_titles):
-                            deduped_news.append(news)
-                            global_seen_titles.append(news.title)
-                    if deduped_news:
-                        all_deep_data.append({"topic": topic, "data": deduped_news})
-                        st.success(f"✅ 深度解剖完毕！锁定 {len(deduped_news)} 篇硬核情报。")
-            st.divider()
+                with st.spinner(f"正在全网嗅探 20 条关键简讯..."):
+                    raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
+                
+                if not raw_results: 
+                    st.warning(f"⚠️ {topic}：近期极度安静，无情报。")
+                    continue
+                
+                with st.spinner("正在为高管梳理【核心时间线】..."):
+                    timeline_events = generate_timeline(ai, raw_results, topic, current_date_str)
+                    if timeline_events:
+                        all_timeline_data.append({"topic": topic, "events": timeline_events})
+                        st.success(f"✅ 生成 {len(timeline_events)} 条核心时间线。")
 
-        if all_deep_data or all_timeline_data:
-            st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
-            st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
-            st.session_state.report_ready = True
+                st.write(f"🔍 提取排名前 10 的深度网页，启动强力爬虫解析正文...")
+                urls_to_scrape = [r['url'] for r in raw_results][:10]
+                
+                with st.spinner("正在并发抓取并进行底层商战分析..."):
+                    full_text_data, valid_count = safe_run_async_crawler(urls=urls_to_scrape)
+                    final_news_list = map_reduce_analysis(ai, topic, full_text_data, current_date_str, time_opt)
+                    
+                    if final_news_list:
+                        deduped_news = []
+                        for news in final_news_list:
+                            if not any(difflib.SequenceMatcher(None, news.title, s).ratio() > 0.6 for s in global_seen_titles):
+                                deduped_news.append(news)
+                                global_seen_titles.append(news.title)
+                        if deduped_news:
+                            all_deep_data.append({"topic": topic, "data": deduped_news})
+                            st.success(f"✅ 深度解剖完毕！锁定 {len(deduped_news)} 篇硬核情报。")
+                st.divider()
 
-if st.session_state.report_ready:
+            if all_deep_data or all_timeline_data:
+                # 生成文件并记录路径
+                st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
+                st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
+                # 切换状态机，并安全地强制刷新！
+                st.session_state.report_ready = True
+                st.rerun()
+
+# =====================================================================
+# 🌟 状态机分支 2：结果态（报告生成完毕后显示纯净下载页）
+# =====================================================================
+else:
     st.balloons()
     st.success("🎉 全链条任务执行完毕！高管专供版研报已就绪。")
+    
     col1, col2 = st.columns(2)
     with col1:
         with open(st.session_state.word_path, "rb") as f:
-            st.download_button("📝 立即下载深度研报 (Word)", f, file_name=st.session_state.word_path, type="secondary")
+            st.download_button("📝 立即下载深度研报 (Word)", f, file_name=st.session_state.word_path, type="secondary", use_container_width=True)
     with col2:
         with open(st.session_state.ppt_path, "rb") as f:
-            st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary")
+            st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
+    
+    st.divider()
+    
+    # 增加一个返回重来的按钮，完美闭环
+    if st.button("🔄 开启新一轮情报探索"):
+        st.session_state.report_ready = False
+        st.session_state.word_path = ""
+        st.session_state.ppt_path = ""
+        st.rerun()
