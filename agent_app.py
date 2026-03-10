@@ -118,7 +118,6 @@ if st.button("🚀 开始极速提炼", type="primary"):
             st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
             st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
             st.session_state.report_ready = True
-            st.rerun()
 
 if st.session_state.report_ready:
     st.balloons()
