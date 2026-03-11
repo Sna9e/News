@@ -7,16 +7,13 @@ from openai import OpenAI
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
-# 🌟 引入刚建好的记忆管家
 from tools.memory_manager import GistMemoryManager 
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
+from agents.battle_agent import generate_battle_card # 🌟 引入刚写好的红蓝对抗大脑
 
-st.set_page_config(page_title="DeepSeek 高管研报", page_icon="🐳", layout="wide")
+st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
 
-# =====================================================================
-# 🌟 全局状态机初始化
-# =====================================================================
 if "report_ready" not in st.session_state:
     st.session_state.report_ready = False
     st.session_state.word_path = ""
@@ -54,8 +51,6 @@ class AI_Driver:
 with st.sidebar:
     st.header("🐳 部门情报控制台")
     
-    # 🌟 核心魔法：安全地从 Streamlit Secrets 中读取固定密钥，无需用户输入！
-    # 只要在 Streamlit 后台配置了，这里就会自动生效。
     try:
         api_key = st.secrets["DEEPSEEK_API_KEY"]
         tavily_key = st.secrets["TAVILY_API_KEY"]
@@ -68,28 +63,24 @@ with st.sidebar:
         api_key, tavily_key, jina_key, gh_token, gist_id = "", "", "", "", ""
 
     st.divider()
-    
-    # 留下普通用户真正需要调的业务参数
     model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
     time_opt = st.selectbox("回溯时间线", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=0)
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
-    # 折叠高级设置，让界面更清爽
     with st.expander("⚙️ 高级搜索源设置"):
         sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
-        
-    file_name = st.text_input("导出文件名", f"研究报告_{datetime.date.today()}")
 
-# =====================================================================
-# 🚀 第一部分：输入与执行区
-# =====================================================================
+    file_name = st.text_input("导出文件名", f"部门高管战报_{datetime.date.today()}")
+
+st.title("🐳 商业情报战情室 (商业分析完全体)")
+
 if not st.session_state.report_ready:
-    query_input = st.text_input("输入主题 (用 \\ 隔开)", "OpenAI \\ Anthropic")
-    start_btn = st.button("🚀 开始极速提炼", type="primary")
+    query_input = st.text_input("输入追踪对象 (对比模式请用 \\ 隔开2家公司，如: OpenAI \\ Anthropic)", "OpenAI \\ Anthropic")
+    start_btn = st.button("🚀 启动战情推演", type="primary")
 
     if start_btn:
         if not api_key or not tavily_key: 
-            st.error("❌ 请先填入核心 API Key！")
+            st.error("❌ 核心服务未连接！")
         else:
             process_container = st.empty()
             
@@ -101,14 +92,13 @@ if not st.session_state.report_ready:
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
                 global_seen_titles = []
                 
-                # 🌟 初始化并唤醒云端记忆库
                 mem_manager = GistMemoryManager(gh_token, gist_id)
                 if gh_token and gist_id:
-                    with st.spinner("🧠 正在从 GitHub 唤醒云端记忆..."):
+                    with st.spinner("🧠 正在唤醒云端长线记忆..."):
                         mem_manager.load_memory()
 
                 for topic in topics:
-                    st.markdown(f"#### 🔵 追踪目标: 【{topic}】")
+                    st.markdown(f"#### 🔵 正在追踪: 【{topic}】")
                     
                     with st.spinner(f"正在全网嗅探关键简讯..."):
                         raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
@@ -122,16 +112,13 @@ if not st.session_state.report_ready:
                         if timeline_events:
                             all_timeline_data.append({"topic": topic, "events": timeline_events})
 
-                    st.write(f"🔍 提取高价值网页，云端直抽正文...")
+                    st.write(f"🔍 正在抽取干货并注入可视化图表引擎...")
                     urls_to_scrape = [r['url'] for r in raw_results][:10]
                     
-                    with st.spinner("🧠 大模型正在结合历史记忆进行推演..."):
-                        # 🌟 提取该主题的历史记忆并传给 AI
+                    with st.spinner("🧠 大模型正在进行深层商战逻辑推演..."):
                         past_memories = mem_manager.get_topic_history(topic)
-                        
                         full_text_data, valid_count = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
                         
-                        # 🌟 接收双重结果：新闻列表 和 供记忆保存的总体洞察
                         final_news_list, new_insight = map_reduce_analysis(ai, topic, full_text_data, current_date_str, time_opt, past_memories)
                         
                         if final_news_list:
@@ -142,31 +129,40 @@ if not st.session_state.report_ready:
                                     global_seen_titles.append(news.title)
                             if deduped_news:
                                 all_deep_data.append({"topic": topic, "data": deduped_news})
-                                st.success(f"✅ 【{topic}】解剖完毕！锁定 {len(deduped_news)} 篇硬核情报。")
+                                st.success(f"✅ 【{topic}】情报解剖完毕！锁定 {len(deduped_news)} 篇硬核干货。")
                                 
-                                # 🌟 把本次产生的新洞察追加到本地缓存中
                                 if new_insight:
                                     mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                     st.divider()
 
-                # 🌟 所有主题分析完后，统一将更新后的记忆账本推送到 GitHub！
+                # 🌟 杀手锏触发：如果刚好搜了两个目标，自动拉响【红蓝对抗战报】！
+                battle_report = None
+                if len(all_deep_data) == 2:
+                    st.markdown("#### ⚔️ 触发隐藏模式：正在召唤【竞品雷达】进行交叉火力分析...")
+                    with st.spinner("🔥 正在生成 SWOT 红蓝对抗战报..."):
+                        import json
+                        # 提炼极简文本给 Battle Agent 分析，节省 Token
+                        data_a = json.dumps([n.summary for n in all_deep_data[0]['data']], ensure_ascii=False)[:3000]
+                        data_b = json.dumps([n.summary for n in all_deep_data[1]['data']], ensure_ascii=False)[:3000]
+                        battle_report = generate_battle_card(ai, all_deep_data[0]['topic'], data_a, all_deep_data[1]['topic'], data_b, current_date_str)
+                        st.success("🏆 竞品对战结果已生成！已附录至 PPT 末尾！")
+
                 if gh_token and gist_id:
-                    with st.spinner("☁️ 正在将今日推演结论永久写入 GitHub 云端..."):
+                    with st.spinner("☁️ 正在将今日战果永久封印至 GitHub 记忆库..."):
                         mem_manager.save_memory()
 
             if all_deep_data or all_timeline_data:
+                # 🌟 生成 Word 时不需要改动，生成 PPT 时强行注入 battle_report
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
-                st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
+                st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id, battle_report)
+                
                 process_container.empty() 
                 st.session_state.report_ready = True
                 st.rerun()
 
-# =====================================================================
-# 🎉 第二部分：结果展示与下载区
-# =====================================================================
 else:
     st.balloons()
-    st.success("🎉 任务圆满完成！高管专供版研报已就绪，历史记忆已永久保存。")
+    st.success("🎉 战报圆满完成！带自动化图表与战局推演的究极研报已就绪。")
     col1, col2 = st.columns(2)
     with col1:
         with open(st.session_state.word_path, "rb") as f:
