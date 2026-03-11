@@ -71,7 +71,7 @@ with st.sidebar:
     
     # 留下普通用户真正需要调的业务参数
     model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
-    time_opt = st.selectbox("回溯时间线", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=1)
+    time_opt = st.selectbox("回溯时间线", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=0)
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
     # 折叠高级设置，让界面更清爽
