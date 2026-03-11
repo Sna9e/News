@@ -8,9 +8,11 @@ class NewsItem(BaseModel):
     title: str = Field(description="新闻标题（务必翻译为中文）")
     source: str = Field(description="来源媒体")
     date_check: str = Field(description="真实日期 YYYY-MM-DD")
-    summary: str = Field(description="深度商业分析。必须严格分段并包含：【事件核心】、【深度细节/数据支撑】、【行业深远影响】。")
+    summary: str = Field(description="深度商业分析...")
+    # 🌟 新增：原文链接字段
+    url: str = Field(description="该新闻的原文链接 URL（必须从原始数据中提取，不得伪造！）")
     importance: int = Field(description="重要性 1-5")
-
+    
 class NewsReport(BaseModel):
     # 🌟 新增：提取 100 字核心记忆
     overall_insight: str = Field(description="100字以内的全局核心摘要，概括本次所有情报的最核心结论，将记录到长期记忆库中。")
