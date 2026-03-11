@@ -67,7 +67,7 @@ with st.sidebar:
     st.divider()
     time_opt = st.selectbox("时间范围", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=1)
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
-    sites = st.text_area("重点搜索源", "techcrunch.com\nbloomberg.com/technology\n36kr.com\nithome.com", height=150)
+    sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
     file_name = st.text_input("文件名", f"高管研报_{datetime.date.today()}")
 
 st.title("🐳 企业情报探员 (高管视角·无坚不摧版)")
@@ -77,7 +77,7 @@ st.title("🐳 企业情报探员 (高管视角·无坚不摧版)")
 # =====================================================================
 if not st.session_state.report_ready:
     query_input = st.text_input("输入主题 (用 \\ 隔开)", "OpenAI \\ Anthropic")
-    start_btn = st.button("🚀 开始极速提炼", type="primary")
+    start_btn = st.button("🚀 开始极速提炼", type="primary") 
 
     if start_btn:
         if not api_key or not tavily_key: 
