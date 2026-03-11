@@ -49,28 +49,36 @@ class AI_Driver:
         except Exception: return None
 
 # =====================================================================
-# 🎛️ 侧边栏配置中心
+# 🎛️ 侧边栏配置中心 (极简部门特供版)
 # =====================================================================
 with st.sidebar:
-    st.header("🐳 研报控制台")
-    api_key = st.text_input("DeepSeek API Key", type="password")
-    tavily_key = st.text_input("Tavily API Key (必填)", type="password")
-    jina_key = st.text_input("Jina API Key (防屏蔽)", type="password")
+    st.header("🐳 部门情报控制台")
     
-    # 🌟 工业级记忆接口配置
-    st.divider()
-    st.markdown("**🧠 云端记忆引擎 (GitHub Gist)**")
-    gh_token = st.text_input("GitHub Token (选填，开启记忆)", type="password", help="需勾选 gist 权限")
-    gist_id = st.text_input("Gist ID (选填，开启记忆)", type="password", help="你创建的 history_bank.json 的 ID")
-    
-    model_id = st.selectbox("模型", ["deepseek-chat"], index=0)
-    st.divider()
-    time_opt = st.selectbox("时间范围", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=1)
-    time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
-    sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
-    file_name = st.text_input("文件名", f"高管研报_{datetime.date.today()}")
+    # 🌟 核心魔法：安全地从 Streamlit Secrets 中读取固定密钥，无需用户输入！
+    # 只要在 Streamlit 后台配置了，这里就会自动生效。
+    try:
+        api_key = st.secrets["DEEPSEEK_API_KEY"]
+        tavily_key = st.secrets["TAVILY_API_KEY"]
+        jina_key = st.secrets.get("JINA_API_KEY", "")
+        gh_token = st.secrets.get("GITHUB_TOKEN", "")
+        gist_id = st.secrets.get("GIST_ID", "")
+        st.success("🔒 部门专属安全引擎已连接")
+    except KeyError:
+        st.error("⚠️ 未在云端检测到 Secrets 配置，请联系管理员！")
+        api_key, tavily_key, jina_key, gh_token, gist_id = "", "", "", "", ""
 
-st.title("🐳 企业情报探员 (带记忆完全体)")
+    st.divider()
+    
+    # 留下普通用户真正需要调的业务参数
+    model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
+    time_opt = st.selectbox("回溯时间线", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=1)
+    time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
+    
+    # 折叠高级设置，让界面更清爽
+    with st.expander("⚙️ 高级搜索源设置"):
+        sites = st.text_area("重点监控域", "techcrunch.com\nbloomberg.com/technology\n36kr.com\nithome.com", height=150)
+        
+    file_name = st.text_input("导出文件名", f"部门高管研报_{datetime.date.today()}")
 
 # =====================================================================
 # 🚀 第一部分：输入与执行区
