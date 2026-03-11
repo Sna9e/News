@@ -4,14 +4,22 @@ from pydantic import BaseModel, Field
 from typing import List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+class ChartData(BaseModel):
+    has_chart: bool = Field(description="如果新闻中包含2个及以上的具体对比数据（如营收、份额、裁员数），设为True；否则设为False。")
+    chart_title: str = Field(description="图表的标题，例如：2023-2024各厂AI模型参数量对比")
+    labels: List[str] = Field(description="横坐标标签，例如：['OpenAI', 'Google', 'Meta']")
+    values: List[float] = Field(description="纵坐标对应的纯数字，例如：[175, 540, 70]")
+    chart_type: str = Field(description="从 'bar'(柱状图), 'pie'(饼图), 'line'(折线图) 中选一个最合适的")
+
 class NewsItem(BaseModel):
     title: str = Field(description="新闻标题（务必翻译为中文）")
     source: str = Field(description="来源媒体")
     date_check: str = Field(description="真实日期 YYYY-MM-DD")
     summary: str = Field(description="深度商业分析...")
-    # 🌟 新增：原文链接字段
-    url: str = Field(description="该新闻的原文链接 URL（必须从原始数据中提取，不得伪造！）")
+    url: str = Field(description="原文链接 URL")
     importance: int = Field(description="重要性 1-5")
+    # 🌟 新增：图表提取器
+    chart_info: ChartData = Field(description="自动化图表数据提取")
     
 class NewsReport(BaseModel):
     # 🌟 新增：提取 100 字核心记忆
