@@ -75,7 +75,9 @@ with st.sidebar:
 st.title("🐳 商业情报战情室 (商业分析完全体)")
 
 if not st.session_state.report_ready:
-    query_input = st.text_input("输入追踪对象 (对比模式请用 \\ 隔开2家公司，如: OpenAI \\ Anthropic)", "OpenAI \\ Anthropic")
+    # 🌟 优化交互提示词
+    st.markdown("💡 **操作指南**：使用 `\` 隔开多个目标进行独立**广度搜索**；使用 `VS` 或 `\\` 隔开2家公司触发**红蓝对抗**。")
+    query_input = st.text_input("输入追踪对象", "OpenAI \\ Anthropic")
     start_btn = st.button("🚀 启动战情推演", type="primary")
 
     if start_btn:
@@ -85,7 +87,20 @@ if not st.session_state.report_ready:
             process_container = st.empty()
             
             with process_container.container():
-                topics = [t.strip() for t in query_input.split('\\') if t.strip()]
+                
+                # 🌟 智能分流解析器：判断用户意图
+                import re
+                is_battle_mode = False
+                
+                # 如果检测到 VS, vs, \\, /，则判定为对抗模式
+                if re.search(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input):
+                    is_battle_mode = True
+                    topics = [t.strip() for t in re.split(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input) if t.strip()]
+                else:
+                    # 否则就是普通的单斜杠 \ 独立广度搜索
+                    is_battle_mode = False
+                    topics = [t.strip() for t in query_input.split('\\') if t.strip()]
+
                 all_deep_data = []
                 all_timeline_data = []
                 ai = AI_Driver(api_key, model_id)
@@ -135,10 +150,10 @@ if not st.session_state.report_ready:
                                     mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                     st.divider()
 
-                # 🌟 杀手锏触发：如果刚好搜了两个目标，自动拉响【红蓝对抗战报】！
+                # 🌟 杀手锏触发：必须显式开启对抗模式，且刚好是 2 个目标，才拉响【红蓝对抗战报】！
                 battle_report = None
-                if len(all_deep_data) == 2:
-                    st.markdown("#### ⚔️ 触发隐藏模式：正在召唤【竞品雷达】进行交叉火力分析...")
+                if is_battle_mode and len(all_deep_data) == 2:
+                    st.markdown("#### ⚔️ 检测到对抗指令：正在召唤【竞品雷达】进行交叉火力分析...")
                     with st.spinner("🔥 正在生成 SWOT 红蓝对抗战报..."):
                         import json
                         # 提炼极简文本给 Battle Agent 分析，节省 Token
@@ -146,6 +161,9 @@ if not st.session_state.report_ready:
                         data_b = json.dumps([n.summary for n in all_deep_data[1]['data']], ensure_ascii=False)[:3000]
                         battle_report = generate_battle_card(ai, all_deep_data[0]['topic'], data_a, all_deep_data[1]['topic'], data_b, current_date_str)
                         st.success("🏆 竞品对战结果已生成！已附录至 PPT 末尾！")
+                elif not is_battle_mode and len(all_deep_data) > 1:
+                    # 贴心的状态反馈
+                    st.info("💡 提示：本次为独立广度追踪，已为您跳过竞品对抗分析。")
 
                 if gh_token and gist_id:
                     with st.spinner("☁️ 正在将今日战果永久封印至 GitHub 记忆库..."):
