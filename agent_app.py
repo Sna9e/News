@@ -78,7 +78,7 @@ with st.sidebar:
     with st.expander("⚙️ 高级搜索源设置"):
         sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
         
-    file_name = st.text_input("导出文件名", f"部门高管研报_{datetime.date.today()}")
+    file_name = st.text_input("导出文件名", f"研究报告_{datetime.date.today()}")
 
 # =====================================================================
 # 🚀 第一部分：输入与执行区
