@@ -118,7 +118,7 @@ if not st.session_state.report_ready:
                         continue
                     
                     with st.spinner("正在梳理【核心时间线】..."):
-                        timeline_events = generate_timeline(ai, raw_results, topic, current_date_str)
+                        timeline_events = generate_timeline(ai, raw_results, topic, current_date_str, time_opt)
                         if timeline_events:
                             all_timeline_data.append({"topic": topic, "events": timeline_events})
 
