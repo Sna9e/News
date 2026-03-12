@@ -33,13 +33,22 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
     all_extracted_news = []
 
     def process_single_doc(doc):
-        map_prompt = f"""
-        【时间锚点】：今天是 **{current_date}**。要求范围：【{time_opt}】。
-        任务：提取关于【{topic}】的新闻情报。
-        红线：发现早于要求时间的旧闻直接丢弃！【{topic}】必须是绝对主角！无符合条件返回空。
-        文本：{doc.page_content}
-        """
-        return ai_driver.analyze_structural(map_prompt, NewsReport)
+        # 👑 缓存优化黑客技 2：绝对静态的 System Prompt (跨任何公司、任何用户都能 100% 命中缓存)
+        map_sys_prompt = """你是一个冷酷无情的商业情报提取机器。
+任务：从杂乱的网页文本中，精准提取与目标主体高度相关的核心商业情报。
+🔴 核心红线：发现早于要求时间的陈年旧闻，必须无情丢弃！宁缺毋滥！"""
+
+        # 👑 缓存优化黑客技 3：User Prompt 倒装句！
+        # 把相同的指令前置，让并行处理的 5 个文档块能共享指令前缀的缓存！
+        map_user_prompt = f"""【当前提取指令】：
+今天是 **{current_date}**。时间范围要求：【{time_opt}】。
+提取目标：【{topic}】。只提取该目标的绝对主角事件，无符合条件请直接返回空。
+
+【待分析网页文本】：
+{doc.page_content}"""
+        
+        # 传入 system_prompt
+        return ai_driver.analyze_structural(map_user_prompt, NewsReport, system_prompt=map_sys_prompt)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         for future in concurrent.futures.as_completed([executor.submit(process_single_doc, d) for d in docs]):
@@ -54,27 +63,28 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
     else:
         detail_prompt = "要求每条新闻约 300 字。侧重于宏观趋势、战略意图的分析。"
 
-    # 🌟 核心升级：包含记忆注入与图表强制提取的最终 Prompt
-    reduce_prompt = f"""
-        【全局时间锚点】：今天是 **{current_date}**。你是顶级科技媒体总编。
-        
-        【🧠 你的历史记忆库】：
-        {past_memories_string}
-        
-        【📰 今天的新情报】：
-        {combined_json}
-        
-        任务：
-        1. 终极剔除旧闻。2. 合并同事件新闻。
-        3. 深度扩写排版：
-        {detail_prompt}
-        ⚠️ 极其重要：如果今天的新情报与【你的历史记忆库】存在延续性、推进或重大反转，请务必在【事件核心】中以“前情回顾”的口吻明确指出并进行对比！
-        📊 极其重要：如果新闻中出现了明显的数据对比（如金额、份额、增速等），请务必准确提取到 chart_info 中，我们将利用这些数据调用可视化 API 进行画图！
-        4. 提炼 overall_insight（100字以内），记录今天的核心结论。
-        5. 最多保留最核心的5条。
-    """
+    # 👑 缓存优化黑客技 4：将排版规则全部封入静态 System
+    reduce_sys_prompt = f"""你是顶级科技媒体的王牌总编。
+你的任务是对前方收集到的情报碎片进行终极清洗、去重和深度排版。
+深度排版要求：
+1. 终极剔除旧闻。合并同事件新闻。
+2. {detail_prompt}
+3. ⚠️ 极其重要：如果新情报与【历史记忆库】存在延续性、推进或重大反转，务必在【事件核心】中以“前情回顾”的口吻明确指出并进行对比！
+4. 📊 极其重要：如果出现了明显的数据对比（如金额、份额、增速等），务必准确提取到 chart_info 中供可视化 API 调用！
+5. 提炼 overall_insight（100字以内），记录今日核心结论。
+6. 最多保留最核心的5条。"""
+
+    reduce_user_prompt = f"""【当前生成指令】：
+今天是 **{current_date}**。请基于下述材料，生成关于【{topic}】的终极情报战报。
+
+【🧠 你的历史记忆库】：
+{past_memories_string}
+
+【📰 今天获取的新情报碎片】：
+{combined_json}"""
     
-    final_report = ai_driver.analyze_structural(reduce_prompt, NewsReport)
+    # 传入 system_prompt
+    final_report = ai_driver.analyze_structural(reduce_user_prompt, NewsReport, system_prompt=reduce_sys_prompt)
     if final_report:
         return final_report.news, final_report.overall_insight
     return [], ""
