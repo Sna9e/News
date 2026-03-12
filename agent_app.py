@@ -3,7 +3,7 @@ import datetime
 import difflib
 from openai import OpenAI
 
-# 🔴 模块化导入 (已移除 QA agent 导入)
+# 🔴 模块化导入
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
@@ -11,6 +11,7 @@ from tools.memory_manager import GistMemoryManager
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
 from agents.battle_agent import generate_battle_card
+from tools.finance_engine import fetch_financial_data # 🌟 引入刚建好的量化金融引擎
 
 st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
 
@@ -45,12 +46,8 @@ class AI_Driver:
             return structure_class(**data)
         except Exception: return None
 
-# =====================================================================
-# 🎛️ 侧边栏配置中心
-# =====================================================================
 with st.sidebar:
     st.header("🐳 部门情报控制台")
-    
     try:
         api_key = st.secrets["DEEPSEEK_API_KEY"]
         tavily_key = st.secrets["TAVILY_API_KEY"]
@@ -69,14 +66,13 @@ with st.sidebar:
     
     with st.expander("⚙️ 高级搜索源设置"):
         sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
-
     file_name = st.text_input("导出文件名", f"部门高管战报_{datetime.date.today()}")
 
 st.title("🐳 商业情报战情室 (商业分析完全体)")
 
 if not st.session_state.report_ready:
     st.markdown("💡 **操作指南**：使用 `\` 隔开多个目标进行独立**广度搜索**；使用 `VS` 或 `\\` 隔开2家公司触发**红蓝对抗**。")
-    query_input = st.text_input("输入追踪对象", "OpenAI \\ Anthropic")
+    query_input = st.text_input("输入追踪对象", "Apple \\ OpenAI")
     start_btn = st.button("🚀 启动战情推演", type="primary")
 
     if start_btn:
@@ -84,13 +80,9 @@ if not st.session_state.report_ready:
             st.error("❌ 核心服务未连接！")
         else:
             process_container = st.empty()
-            
             with process_container.container():
-                
-                # 🌟 智能分流解析器：判断用户意图
                 import re
                 is_battle_mode = False
-                
                 if re.search(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input):
                     is_battle_mode = True
                     topics = [t.strip() for t in re.split(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input) if t.strip()]
@@ -111,6 +103,14 @@ if not st.session_state.report_ready:
 
                 for topic in topics:
                     st.markdown(f"#### 🔵 正在追踪: 【{topic}】")
+                    
+                    # 🌟 新增：在开始文字分析前，先扫描量化金融数据
+                    with st.spinner(f"📈 正在连接雅虎财经，扫描【{topic}】二级市场数据..."):
+                        finance_data = fetch_financial_data(ai, topic)
+                        if finance_data.get('is_public'):
+                            st.success(f"💹 锁定【{topic}】股票代码: {finance_data['ticker']}，市值: {finance_data['market_cap']}")
+                        else:
+                            st.info(f"🏢 判定【{topic}】为非上市/未追踪实体。")
                     
                     with st.spinner(f"正在全网嗅探关键简讯..."):
                         raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
@@ -140,8 +140,9 @@ if not st.session_state.report_ready:
                                     deduped_news.append(news)
                                     global_seen_titles.append(news.title)
                             if deduped_news:
-                                all_deep_data.append({"topic": topic, "data": deduped_news})
-                                st.success(f"✅ 【{topic}】情报解剖完毕！锁定 {len(deduped_news)} 篇硬核干货。")
+                                # 🌟 核心修改：把 finance_data 一并塞进大礼包里传给导出引擎
+                                all_deep_data.append({"topic": topic, "data": deduped_news, "finance": finance_data})
+                                st.success(f"✅ 【{topic}】情报解剖完毕！")
                                 
                                 if new_insight:
                                     mem_manager.add_topic_memory(topic, current_date_str, new_insight)
@@ -155,7 +156,7 @@ if not st.session_state.report_ready:
                         data_a = json.dumps([n.summary for n in all_deep_data[0]['data']], ensure_ascii=False)[:3000]
                         data_b = json.dumps([n.summary for n in all_deep_data[1]['data']], ensure_ascii=False)[:3000]
                         battle_report = generate_battle_card(ai, all_deep_data[0]['topic'], data_a, all_deep_data[1]['topic'], data_b, current_date_str)
-                        st.success("🏆 竞品对战结果已生成！已附录至 PPT 末尾！")
+                        st.success("🏆 竞品对战结果已生成！")
                 elif not is_battle_mode and len(all_deep_data) > 1:
                     st.info("💡 提示：本次为独立广度追踪，已为您跳过竞品对抗分析。")
 
@@ -166,15 +167,13 @@ if not st.session_state.report_ready:
             if all_deep_data or all_timeline_data:
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id, battle_report)
-                
                 process_container.empty() 
                 st.session_state.report_ready = True
                 st.rerun()
 
-# 恢复了干净清爽的结算页面
 else:
     st.balloons()
-    st.success("🎉 战报圆满完成！带自动化图表与战局推演的究极研报已就绪。")
+    st.success("🎉 战报圆满完成！带自动化图表、量化金融数据与战局推演的究极研报已就绪。")
     col1, col2 = st.columns(2)
     with col1:
         with open(st.session_state.word_path, "rb") as f:
