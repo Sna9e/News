@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import difflib
 from openai import OpenAI
+from agents.qa_agent import chat_with_report # 🌟 引入问答解读大脑
 
 # 🔴 模块化导入
 from tools.search_engine import search_web, safe_run_async_crawler
@@ -170,6 +171,8 @@ if not st.session_state.report_ready:
                         mem_manager.save_memory()
 
             if all_deep_data or all_timeline_data:
+                # 🌟 新增这一行：将情报数据存入缓存，供 QA 大脑使用
+                st.session_state.report_context_data = all_deep_data
                 # 🌟 生成 Word 时不需要改动，生成 PPT 时强行注入 battle_report
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id, battle_report)
@@ -181,6 +184,8 @@ if not st.session_state.report_ready:
 else:
     st.balloons()
     st.success("🎉 战报圆满完成！带自动化图表与战局推演的究极研报已就绪。")
+    
+    # 下载按钮区域
     col1, col2 = st.columns(2)
     with col1:
         with open(st.session_state.word_path, "rb") as f:
@@ -188,9 +193,41 @@ else:
     with col2:
         with open(st.session_state.ppt_path, "rb") as f:
             st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
+            
+    # 🌟 新增：双向交互 - 战报追问舱
+    st.divider()
+    st.markdown("### 💬 战报深度解读 (Ask the Report)")
+    st.caption("您可以针对上方刚刚生成的战报内容，进行自由提问（例如：某公司的具体融资金额是多少？）")
+    
+    # 初始化聊天历史
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = [{"role": "assistant", "content": "老板您好，我是本次战报的解读助理。关于报告中的任何细节，您可以随时向我提问！"}]
+        
+    # 渲染历史对话
+    for msg in st.session_state.chat_history:
+        st.chat_message(msg["role"]).write(msg["content"])
+        
+    # 聊天输入框
+    if user_question := st.chat_input("向 AI 分析师提问..."):
+        st.chat_message("user").write(user_question)
+        st.session_state.chat_history.append({"role": "user", "content": user_question})
+        
+        # 将本次搜集到的所有摘要组合成知识上下文
+        import json
+        # 为了节约 token，我们只喂给它结构化的摘要数据
+        context_data = json.dumps(st.session_state.get("report_context_data", []), ensure_ascii=False)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("正在检索战报情报库..."):
+                ai = AI_Driver(api_key, model_id)
+                answer = chat_with_report(ai, user_question, context_data)
+                st.write(answer)
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
     st.divider()
     if st.button("🔄 开启新一轮情报探索", use_container_width=True):
         st.session_state.report_ready = False
         st.session_state.word_path = ""
         st.session_state.ppt_path = ""
+        st.session_state.chat_history = [] # 清空上一次的聊天记录
         st.rerun()
