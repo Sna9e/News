@@ -16,7 +16,7 @@ class NewsItem(BaseModel):
     title: str = Field(description="新闻标题（务必翻译为中文）")
     source: str = Field(description="来源媒体")
     date_check: str = Field(description="真实日期 YYYY-MM-DD")
-    summary: str = Field(description="深度商业分析。必须严格分段并包含：【事件核心】、【深度细节/数据支撑】、【行业深远影响】。")
+    summary: str = Field(description="深度商业分析。必须严格分段并包含：【事件核心】、【深度细节/数据支撑】、【行业影响】。")
     url: str = Field(description="该新闻的原文链接 URL（必须从原始数据中提取，提供给高管溯源，绝不可伪造）")
     importance: int = Field(description="重要性 1-5")
     # 🌟 新增：挂载图表提取器
@@ -50,7 +50,7 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
     combined_json = json.dumps([item.model_dump() for item in all_extracted_news], ensure_ascii=False)
 
     if "24" in time_opt:
-        detail_prompt = "要求每条新闻约 600 字。必须强行提取：具体的数字（融资金额、股价等）、核心原话、微小动作细节。"
+        detail_prompt = "要求每条新闻约 600 字。必须强行提取：具体的数字（融资金额、股价等）、核心原话、事件细节。"
     else:
         detail_prompt = "要求每条新闻约 300 字。侧重于宏观趋势、战略意图的分析。"
 
@@ -70,8 +70,8 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
         {detail_prompt}
         ⚠️ 极其重要：如果今天的新情报与【你的历史记忆库】存在延续性、推进或重大反转，请务必在【事件核心】中以“前情回顾”的口吻明确指出并进行对比！
         📊 极其重要：如果新闻中出现了明显的数据对比（如金额、份额、增速等），请务必准确提取到 chart_info 中，我们将利用这些数据调用可视化 API 进行画图！
-        4. 提炼 overall_insight（100字以内），记录今天的核心结论。
-        5. 最多保留最核心的5条。
+        4. 提炼 overall_insight（200字以内），记录今天的核心结论。
+        5. 最多保留最核心的6条。
     """
     
     final_report = ai_driver.analyze_structural(reduce_prompt, NewsReport)
