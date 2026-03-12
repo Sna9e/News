@@ -16,10 +16,9 @@ class NewsItem(BaseModel):
     title: str = Field(description="新闻标题（务必翻译为中文）")
     source: str = Field(description="来源媒体")
     date_check: str = Field(description="真实日期 YYYY-MM-DD")
-    summary: str = Field(description="深度商业分析。必须严格分段并包含：【事件核心】、【深度细节/数据支撑】、【行业影响】。")
+    summary: str = Field(description="深度商业分析。必须严格分段：【事件核心】（需极其详尽，占全篇40%以上篇幅）、【深度细节/数据支撑】、【行业深远影响】。")
     url: str = Field(description="该新闻的原文链接 URL（必须从原始数据中提取，提供给高管溯源，绝不可伪造）")
     importance: int = Field(description="重要性 1-5")
-    # 🌟 新增：挂载图表提取器
     chart_info: ChartData = Field(description="自动化图表数据提取")
 
 class NewsReport(BaseModel):
@@ -50,9 +49,9 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
     combined_json = json.dumps([item.model_dump() for item in all_extracted_news], ensure_ascii=False)
 
     if "24" in time_opt:
-        detail_prompt = "要求每条新闻约 600 字。必须强行提取：具体的数字（融资金额、股价等）、核心原话、事件细节。"
+        detail_prompt = "要求每条新闻约 800 字（请重点扩充【事件核心】部分，比平时增加1/3的篇幅）。必须强行提取：具体的数字（融资金额、股价等）、核心原话、微小动作细节。"
     else:
-        detail_prompt = "要求每条新闻约 300 字。侧重于宏观趋势、战略意图的分析。"
+        detail_prompt = "要求每条新闻约 400 字（请重点扩充【事件核心】部分，比平时增加1/3的篇幅）。侧重于宏观趋势、战略意图的分析。"
 
     # 🌟 核心升级：包含记忆注入与图表强制提取的最终 Prompt
     reduce_prompt = f"""
