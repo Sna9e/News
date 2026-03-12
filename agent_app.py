@@ -2,16 +2,15 @@ import streamlit as st
 import datetime
 import difflib
 from openai import OpenAI
-from agents.qa_agent import chat_with_report # 🌟 引入问答解读大脑
 
-# 🔴 模块化导入
+# 🔴 模块化导入 (已移除 QA agent 导入)
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
 from tools.memory_manager import GistMemoryManager 
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
-from agents.battle_agent import generate_battle_card # 🌟 引入刚写好的红蓝对抗大脑
+from agents.battle_agent import generate_battle_card
 
 st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
 
@@ -47,7 +46,7 @@ class AI_Driver:
         except Exception: return None
 
 # =====================================================================
-# 🎛️ 侧边栏配置中心 (极简部门特供版)
+# 🎛️ 侧边栏配置中心
 # =====================================================================
 with st.sidebar:
     st.header("🐳 部门情报控制台")
@@ -76,7 +75,6 @@ with st.sidebar:
 st.title("🐳 商业情报战情室 (商业分析完全体)")
 
 if not st.session_state.report_ready:
-    # 🌟 优化交互提示词
     st.markdown("💡 **操作指南**：使用 `\` 隔开多个目标进行独立**广度搜索**；使用 `VS` 或 `\\` 隔开2家公司触发**红蓝对抗**。")
     query_input = st.text_input("输入追踪对象", "OpenAI \\ Anthropic")
     start_btn = st.button("🚀 启动战情推演", type="primary")
@@ -93,12 +91,10 @@ if not st.session_state.report_ready:
                 import re
                 is_battle_mode = False
                 
-                # 如果检测到 VS, vs, \\, /，则判定为对抗模式
                 if re.search(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input):
                     is_battle_mode = True
                     topics = [t.strip() for t in re.split(r'\s+VS\s+|\s+vs\s+|\\\\|/', query_input) if t.strip()]
                 else:
-                    # 否则就是普通的单斜杠 \ 独立广度搜索
                     is_battle_mode = False
                     topics = [t.strip() for t in query_input.split('\\') if t.strip()]
 
@@ -151,19 +147,16 @@ if not st.session_state.report_ready:
                                     mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                     st.divider()
 
-                # 🌟 杀手锏触发：必须显式开启对抗模式，且刚好是 2 个目标，才拉响【红蓝对抗战报】！
                 battle_report = None
                 if is_battle_mode and len(all_deep_data) == 2:
                     st.markdown("#### ⚔️ 检测到对抗指令：正在召唤【竞品雷达】进行交叉火力分析...")
                     with st.spinner("🔥 正在生成 SWOT 红蓝对抗战报..."):
                         import json
-                        # 提炼极简文本给 Battle Agent 分析，节省 Token
                         data_a = json.dumps([n.summary for n in all_deep_data[0]['data']], ensure_ascii=False)[:3000]
                         data_b = json.dumps([n.summary for n in all_deep_data[1]['data']], ensure_ascii=False)[:3000]
                         battle_report = generate_battle_card(ai, all_deep_data[0]['topic'], data_a, all_deep_data[1]['topic'], data_b, current_date_str)
                         st.success("🏆 竞品对战结果已生成！已附录至 PPT 末尾！")
                 elif not is_battle_mode and len(all_deep_data) > 1:
-                    # 贴心的状态反馈
                     st.info("💡 提示：本次为独立广度追踪，已为您跳过竞品对抗分析。")
 
                 if gh_token and gist_id:
@@ -171,9 +164,6 @@ if not st.session_state.report_ready:
                         mem_manager.save_memory()
 
             if all_deep_data or all_timeline_data:
-                # 🌟 新增这一行：将情报数据存入缓存，供 QA 大脑使用
-                st.session_state.report_context_data = all_deep_data
-                # 🌟 生成 Word 时不需要改动，生成 PPT 时强行注入 battle_report
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id, battle_report)
                 
@@ -181,11 +171,10 @@ if not st.session_state.report_ready:
                 st.session_state.report_ready = True
                 st.rerun()
 
+# 恢复了干净清爽的结算页面
 else:
     st.balloons()
     st.success("🎉 战报圆满完成！带自动化图表与战局推演的究极研报已就绪。")
-    
-    # 下载按钮区域
     col1, col2 = st.columns(2)
     with col1:
         with open(st.session_state.word_path, "rb") as f:
@@ -193,41 +182,9 @@ else:
     with col2:
         with open(st.session_state.ppt_path, "rb") as f:
             st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
-            
-    # 🌟 新增：双向交互 - 战报追问舱
-    st.divider()
-    st.markdown("### 💬 战报深度解读 (Ask the Report)")
-    st.caption("您可以针对上方刚刚生成的战报内容，进行自由提问（例如：某公司的具体融资金额是多少？）")
-    
-    # 初始化聊天历史
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = [{"role": "assistant", "content": "老板您好，我是本次战报的解读助理。关于报告中的任何细节，您可以随时向我提问！"}]
-        
-    # 渲染历史对话
-    for msg in st.session_state.chat_history:
-        st.chat_message(msg["role"]).write(msg["content"])
-        
-    # 聊天输入框
-    if user_question := st.chat_input("向 AI 分析师提问..."):
-        st.chat_message("user").write(user_question)
-        st.session_state.chat_history.append({"role": "user", "content": user_question})
-        
-        # 将本次搜集到的所有摘要组合成知识上下文
-        import json
-        # 为了节约 token，我们只喂给它结构化的摘要数据
-        context_data = json.dumps(st.session_state.get("report_context_data", []), ensure_ascii=False)
-        
-        with st.chat_message("assistant"):
-            with st.spinner("正在检索战报情报库..."):
-                ai = AI_Driver(api_key, model_id)
-                answer = chat_with_report(ai, user_question, context_data)
-                st.write(answer)
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
     st.divider()
     if st.button("🔄 开启新一轮情报探索", use_container_width=True):
         st.session_state.report_ready = False
         st.session_state.word_path = ""
         st.session_state.ppt_path = ""
-        st.session_state.chat_history = [] # 清空上一次的聊天记录
         st.rerun()
