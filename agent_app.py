@@ -29,14 +29,19 @@ class AI_Driver:
             self.valid = True
         except Exception: pass
 
-    def analyze_structural(self, prompt, structure_class):
+# 🌟 修改了这里：增加 system_prompt 参数
+    def analyze_structural(self, prompt, structure_class, system_prompt=""):
         if not self.valid: return None
         import json
-        sys_prompt = f"必须按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
+        
+        # 👑 缓存优化黑客技 1：把死记硬背的 JSON Schema 永远锁在 System Prompt 的最末尾。
+        # 这样无论业务怎么变，底层的 System 格式永远保持绝对一致，极大增加全局命中率。
+        full_sys_prompt = f"{system_prompt}\n\n必须严格按以下 JSON Schema 返回数据:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
+        
         try:
             res = self.client.chat.completions.create(
                 model=self.model_id,
-                messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
+                messages=[{"role": "system", "content": full_sys_prompt}, {"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0.1, max_tokens=4096 
             )
@@ -44,8 +49,7 @@ class AI_Driver:
             if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
             return structure_class(**data)
         except Exception: return None
-
-# =====================================================================
+            
 # 🎛️ 侧边栏配置中心 (极简部门特供版)
 # =====================================================================
 with st.sidebar:
