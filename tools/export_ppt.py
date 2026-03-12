@@ -4,7 +4,7 @@ from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 import datetime
-import tools.chart_generator as cg  # 🌟 引入刚写好的自动化图表库
+import tools.chart_generator as cg 
 
 def clear_placeholders(slide):
     for shape in list(slide.shapes):
@@ -12,7 +12,6 @@ def clear_placeholders(slide):
             sp = shape.element
             sp.getparent().remove(sp)
 
-# 🌟 接收新增的 battle_data 参数
 def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
     template_path = "template.pptx"
     if os.path.exists(template_path):
@@ -23,9 +22,7 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
     else:
         prs = Presentation()
         
-    # ==========================================
-    # 🛡️ 1. 封面页
-    # ==========================================
+    # 1. 封面页
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     clear_placeholders(slide) 
     
@@ -33,7 +30,7 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
     tf = title_box.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    p.text = "研究报告：行业前沿情报深度分析"
+    p.text = "高管战报：行业前沿情报深度分析"
     p.font.size = Pt(32)
     p.font.bold = True
     p.alignment = PP_ALIGN.CENTER
@@ -46,9 +43,7 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
     p_sub.alignment = PP_ALIGN.CENTER
     p_sub.line_spacing = 1.0 
 
-    # ==========================================
-    # ⏱️ 2. 时间线总览
-    # ==========================================
+    # 2. 时间线总览
     if timeline_data:
         for t_data in timeline_data:
             if not t_data['events']: continue
@@ -78,28 +73,25 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                     p.line_spacing = 1.0 
                     p.space_after = Pt(8)
 
-# ==========================================
-    # 🎯 3. 深度研报正文 (含金融面板与图表引擎)
-    # ==========================================
+    # 3. 深度研报正文 (含金融面板与图表引擎)
     for section in data:
         if not section['data']: continue
         
-        # 🌟 插入大招：二级市场晴雨表 (如果有量化数据)
+        # 二级市场晴雨表
         finance = section.get('finance', {})
         if finance.get('is_public') and finance.get('chart_path'):
             layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
             f_slide = prs.slides.add_slide(layout)
             clear_placeholders(f_slide)
             
-            # 标题
             t_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
             t_p = t_box.text_frame.paragraphs[0]
             t_p.text = f"📈 {section['topic']} ({finance['ticker']}) - 资本市场晴雨表"
             t_p.font.size = Pt(26)
             t_p.font.bold = True
             
-            # 左侧核心指标面板
-            b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(4), Inches(4))
+            # 🌟 调整：左侧指标框拉宽
+            b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(4.5), Inches(4))
             tf = b_box.text_frame
             
             p_price = tf.paragraphs[0]
@@ -108,7 +100,6 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
             p_price.font.bold = True
             
             p_change = tf.add_paragraph()
-            # 涨红跌绿 (国际常用) 或自定义
             trend_icon = "🔺" if finance['change_pct'] > 0 else "🔻"
             p_change.text = f"近一月涨跌: {trend_icon} {finance['change_pct']}%"
             p_change.font.size = Pt(18)
@@ -119,11 +110,11 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
             p_mc.font.size = Pt(18)
             p_mc.space_before = Pt(20)
             
-            # 右侧渲染金融走势折线图
+            # 🌟 调整：右侧金融折线图向右推
             if os.path.exists(finance['chart_path']):
-                f_slide.shapes.add_picture(finance['chart_path'], Inches(4.5), Inches(1.8), width=Inches(5))
+                f_slide.shapes.add_picture(finance['chart_path'], Inches(5.2), Inches(1.8), width=Inches(4.5))
 
-        # 接下来插入常规新闻页 (保持原有代码不变...)
+        # 常规新闻页
         for news in section['data']:
             layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
             slide = prs.slides.add_slide(layout)
@@ -140,7 +131,8 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                 if len(news.chart_info.labels) == len(news.chart_info.values) and len(news.chart_info.labels) > 0:
                     has_chart = True
 
-            text_width = 5.2 if has_chart else 9.0
+            # 🌟 调整：有图表时，左侧文字框变宽给文字呼吸空间 (5.2 -> 5.5)
+            text_width = 5.5 if has_chart else 9.0
             b_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(text_width), Inches(5))
             tf = b_box.text_frame
             tf.word_wrap = True
@@ -183,13 +175,12 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                         news.chart_info.chart_type
                     )
                     if chart_img and os.path.exists(chart_img):
-                        slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.8), width=Inches(3.8))
+                        # 🌟 调整：右侧数据图表向右推，稍微缩窄防止出界
+                        slide.shapes.add_picture(chart_img, Inches(6.1), Inches(1.8), width=Inches(3.6))
                 except Exception as e:
                     print(f"图表渲染失败跳过: {e}")
 
-    # ==========================================
-    # ⚔️ 4. 竞品雷达：红蓝对抗战报页
-    # ==========================================
+    # 4. 竞品雷达：红蓝对抗战报页
     if battle_data:
         layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
         slide = prs.slides.add_slide(layout)
