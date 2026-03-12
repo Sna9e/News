@@ -78,12 +78,52 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                     p.line_spacing = 1.0 
                     p.space_after = Pt(8)
 
-    # ==========================================
-    # 🎯 3. 深度研报正文 (带可视化图表引擎)
+# ==========================================
+    # 🎯 3. 深度研报正文 (含金融面板与图表引擎)
     # ==========================================
     for section in data:
         if not section['data']: continue
         
+        # 🌟 插入大招：二级市场晴雨表 (如果有量化数据)
+        finance = section.get('finance', {})
+        if finance.get('is_public') and finance.get('chart_path'):
+            layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
+            f_slide = prs.slides.add_slide(layout)
+            clear_placeholders(f_slide)
+            
+            # 标题
+            t_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
+            t_p = t_box.text_frame.paragraphs[0]
+            t_p.text = f"📈 {section['topic']} ({finance['ticker']}) - 资本市场晴雨表"
+            t_p.font.size = Pt(26)
+            t_p.font.bold = True
+            
+            # 左侧核心指标面板
+            b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.8), Inches(4), Inches(4))
+            tf = b_box.text_frame
+            
+            p_price = tf.paragraphs[0]
+            p_price.text = f"最新收盘价: {finance['current_price']} {finance['currency']}"
+            p_price.font.size = Pt(20)
+            p_price.font.bold = True
+            
+            p_change = tf.add_paragraph()
+            # 涨红跌绿 (国际常用) 或自定义
+            trend_icon = "🔺" if finance['change_pct'] > 0 else "🔻"
+            p_change.text = f"近一月涨跌: {trend_icon} {finance['change_pct']}%"
+            p_change.font.size = Pt(18)
+            p_change.font.color.rgb = RGBColor(0, 150, 0) if finance['change_pct'] > 0 else RGBColor(200, 0, 0)
+            
+            p_mc = tf.add_paragraph()
+            p_mc.text = f"当前总市值: {finance['market_cap']} {finance['currency']}"
+            p_mc.font.size = Pt(18)
+            p_mc.space_before = Pt(20)
+            
+            # 右侧渲染金融走势折线图
+            if os.path.exists(finance['chart_path']):
+                f_slide.shapes.add_picture(finance['chart_path'], Inches(4.5), Inches(1.8), width=Inches(5))
+
+        # 接下来插入常规新闻页 (保持原有代码不变...)
         for news in section['data']:
             layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
             slide = prs.slides.add_slide(layout)
@@ -95,13 +135,11 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
             t_p.font.size = Pt(22)
             t_p.font.bold = True
 
-            # 📊 检查是否带有图表数据
             has_chart = False
             if hasattr(news, 'chart_info') and news.chart_info.has_chart:
                 if len(news.chart_info.labels) == len(news.chart_info.values) and len(news.chart_info.labels) > 0:
                     has_chart = True
 
-            # 🛡️ 智能排版：如果有图，文本框收缩到左边 5.2 英寸；没图则占据 9 英寸满屏
             text_width = 5.2 if has_chart else 9.0
             b_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(text_width), Inches(5))
             tf = b_box.text_frame
@@ -136,7 +174,6 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                 p_link.font.underline = True
                 p_link.runs[0].hyperlink.address = news_url
 
-            # 🎨 在右侧渲染动态图表
             if has_chart:
                 try:
                     chart_img = cg.generate_and_download_chart(
@@ -146,39 +183,35 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                         news.chart_info.chart_type
                     )
                     if chart_img and os.path.exists(chart_img):
-                        # 插入图片在右半边 (Left=5.8, Top=1.8, Width=3.8)
                         slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.8), width=Inches(3.8))
                 except Exception as e:
                     print(f"图表渲染失败跳过: {e}")
 
     # ==========================================
-    # ⚔️ 4. 竞品雷达：红蓝对抗战报页 (隐藏的大招)
+    # ⚔️ 4. 竞品雷达：红蓝对抗战报页
     # ==========================================
     if battle_data:
         layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
         slide = prs.slides.add_slide(layout)
         clear_placeholders(slide)
         
-        # 霸气的雷达标题
         t_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
         t_p = t_box.text_frame.paragraphs[0]
         t_p.text = "⚔️ 竞品雷达：红蓝对抗战报"
         t_p.font.size = Pt(26)
         t_p.font.bold = True
-        t_p.font.color.rgb = RGBColor(192, 0, 0) # 战报红色
+        t_p.font.color.rgb = RGBColor(192, 0, 0) 
         
         b_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(9), Inches(5.5))
         tf = b_box.text_frame
         tf.word_wrap = True
         
-        # 战局总结
         p_sum = tf.paragraphs[0]
         p_sum.text = f"【终极推演】 {battle_data.summary}"
         p_sum.font.size = Pt(16)
         p_sum.font.bold = True
         p_sum.space_after = Pt(15)
         
-        # 维度拉踩对比
         for dim in battle_data.dimensions:
             p_dim = tf.add_paragraph()
             p_dim.text = f"🎯 对抗维度：{dim.dimension}  🏆 赢家判定：{dim.winner}"
