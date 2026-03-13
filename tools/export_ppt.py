@@ -19,23 +19,19 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
         except Exception: prs = Presentation()
     else: prs = Presentation()
         
-    # ================= 1. 封面页 =================
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     clear_placeholders(slide) 
     title_box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(1))
-    tf = title_box.text_frame
-    tf.paragraphs[0].text = "高管战报：行业前沿情报深度分析"
-    tf.paragraphs[0].font.size = Pt(32)
-    tf.paragraphs[0].font.bold = True
-    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
+    title_box.text_frame.paragraphs[0].text = "高管战报：前沿情报深度分析"
+    title_box.text_frame.paragraphs[0].font.size = Pt(32)
+    title_box.text_frame.paragraphs[0].font.bold = True
+    title_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
     
     subtitle_box = slide.shapes.add_textbox(Inches(1), Inches(3.5), Inches(8), Inches(1))
-    tf_sub = subtitle_box.text_frame
-    tf_sub.paragraphs[0].text = f"生成日期: {datetime.date.today()}\n数据引擎: Tavily & {model_name}"
-    tf_sub.paragraphs[0].font.size = Pt(18)
-    tf_sub.paragraphs[0].alignment = PP_ALIGN.CENTER
+    subtitle_box.text_frame.paragraphs[0].text = f"生成日期: {datetime.date.today()}"
+    subtitle_box.text_frame.paragraphs[0].font.size = Pt(16)
+    subtitle_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
 
-    # ================= 2. 时间线总览 =================
     if timeline_data:
         for t_data in timeline_data:
             if not t_data['events']: continue
@@ -43,8 +39,7 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
             events = t_data['events']
             for i in range(0, len(events), chunk_size):
                 chunk = events[i:i + chunk_size]
-                layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-                slide = prs.slides.add_slide(layout)
+                slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
                 clear_placeholders(slide) 
                 
                 t_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
@@ -61,104 +56,95 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                     p.font.size = Pt(14)
                     p.space_after = Pt(8)
 
-    # ================= 3. 深度研报正文 (含高级排版) =================
     for section in data:
         if not section['data']: continue
         
-        # 🌟 绝杀：彭博终端级二级市场仪表盘 (网格化排版)
+        # 🌟 绝杀：金融与催化剂专属页
         finance = section.get('finance', {})
         if finance.get('is_public') and finance.get('chart_path'):
-            layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-            f_slide = prs.slides.add_slide(layout)
+            f_slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(f_slide)
             
-            # 【顶部】标题
+            # 顶部标题
             t_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(9), Inches(0.8))
-            t_p = t_box.text_frame.paragraphs[0]
-            t_p.text = f"📈 {section['topic']} ({finance['ticker']}) - 量化市场异动归因"
-            t_p.font.size = Pt(24)
-            t_p.font.bold = True
+            t_box.text_frame.paragraphs[0].text = f"📊 {section['topic']} ({finance['ticker']}) - 量化面与事件催化"
+            t_box.text_frame.paragraphs[0].font.size = Pt(22)
+            t_box.text_frame.paragraphs[0].font.bold = True
             
-            # 【左上】核心盘面数据网格 (严格限制宽度，防重叠)
-            b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(4.0), Inches(3.0))
+            # 【左上】硬核量化估值面板 (严格限宽，防图片重叠)
+            b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(4.0), Inches(2.8))
             tf = b_box.text_frame
             
-            p_price = tf.paragraphs[0]
             trend_icon = "🔺" if finance['change_pct'] > 0 else "🔻"
             color = RGBColor(192, 0, 0) if finance['change_pct'] > 0 else RGBColor(0, 150, 0)
-            
-            p_price.text = f"收盘价: {finance['current_price']} {finance['currency']}  {trend_icon} {finance['change_pct']}%"
-            p_price.font.size = Pt(20)
+            p_price = tf.paragraphs[0]
+            p_price.text = f"{finance['current_price']} {finance['currency']}  {trend_icon} {finance['change_pct']}%"
+            p_price.font.size = Pt(24)
             p_price.font.bold = True
             p_price.font.color.rgb = color
             
             metrics = [
-                f"▪ 今开: {finance['open_price']}    \t▪ 昨收: {finance['prev_close']}",
-                f"▪ 成交量: {finance['volume']}  \t▪ 市盈率(TTM): {finance['pe_ratio']}",
-                f"▪ 总市值: {finance['market_cap']}  \t▪ 52周区间: {finance['range_52w']}"
+                f"▪ 估值水平: {finance['pe_pb']}",
+                f"▪ 股权风险溢价: {finance['erp']}",
+                f"▪ 总市值: {finance['market_cap']}"
             ]
             for m in metrics:
                 p = tf.add_paragraph()
                 p.text = m
-                p.font.size = Pt(14)
+                p.font.size = Pt(13)
                 p.space_before = Pt(12)
 
-            # 【右上】专业的 K线+成交量图 (推到最右侧)
+            # 【右上】专业 K线图 (强行推到右侧，留出边界)
             if os.path.exists(finance['chart_path']):
-                f_slide.shapes.add_picture(finance['chart_path'], Inches(4.6), Inches(1.0), width=Inches(5.0))
+                f_slide.shapes.add_picture(finance['chart_path'], Inches(4.5), Inches(1.2), width=Inches(5.0))
 
-            # 【底部通栏】详细异动归因分析 (完全独立的文本框)
-            cat_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(4.6), Inches(9.0), Inches(2.5))
-            tf_cat = cat_box.text_frame
-            tf_cat.word_wrap = True
+            # 【底部下半场】四维度机构级事件归因
+            cat = finance.get('catalysts', {})
+            boxes_data = [
+                ("🏛️ 政策与监管", cat.get('policy', "近期无重大政策催化")),
+                ("💰 财报与盈利", cat.get('earnings', "未见核心财报数据")),
+                ("🚀 产业标志事件", cat.get('landmark', "产业层级平稳")),
+                ("🔄 市场风格轮动", cat.get('style', "风格未见明显切换"))
+            ]
             
-            p_title = tf_cat.paragraphs[0]
-            p_title.text = "🔥 近期核心异动催化剂："
-            p_title.font.size = Pt(16)
-            p_title.font.bold = True
-            p_title.font.color.rgb = RGBColor(0, 51, 102)
-            
-            for news in section['data'][:2]: 
-                # 提取摘要的第一句话作为深入解读
-                brief = news.summary.split('\n')[0].replace("【事件核心】", "").strip()
-                if len(brief) > 85: brief = brief[:85] + "..." # 防止字数过多溢出
+            for i, (title, content) in enumerate(boxes_data):
+                x_pos = 0.5 + (i * 2.2) 
+                c_box = f_slide.shapes.add_textbox(Inches(x_pos), Inches(4.5), Inches(2.1), Inches(2.5))
+                c_tf = c_box.text_frame
+                c_tf.word_wrap = True
                 
-                p_news = tf_cat.add_paragraph()
-                p_news.text = f"• {news.title}"
-                p_news.font.size = Pt(14)
-                p_news.font.bold = True
+                p_t = c_tf.paragraphs[0]
+                p_t.text = title
+                p_t.font.size = Pt(12)
+                p_t.font.bold = True
+                p_t.font.color.rgb = RGBColor(0, 51, 102)
                 
-                p_detail = tf_cat.add_paragraph()
-                p_detail.text = f"  解读: {brief}"
-                p_detail.font.size = Pt(12)
-                p_detail.font.color.rgb = RGBColor(100, 100, 100) # 灰色副标题
-                p_detail.space_after = Pt(6)
+                p_c = c_tf.add_paragraph()
+                p_c.text = content
+                p_c.font.size = Pt(11)
+                p_c.space_before = Pt(6)
 
-        # 🌟 常规新闻解读页 (优化图表大小与避让)
+        # 🌟 常规新闻分析页 (保持原有逻辑，不受污染)
         for news in section['data']:
-            layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-            slide = prs.slides.add_slide(layout)
+            slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(slide) 
             
             t_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
-            t_p = t_box.text_frame.paragraphs[0]
-            t_p.text = news.title
-            t_p.font.size = Pt(22)
-            t_p.font.bold = True
+            t_box.text_frame.paragraphs[0].text = news.title
+            t_box.text_frame.paragraphs[0].font.size = Pt(22)
+            t_box.text_frame.paragraphs[0].font.bold = True
 
             has_chart = hasattr(news, 'chart_info') and news.chart_info.has_chart and len(news.chart_info.labels) > 0
-            
-            # 【左侧文字防挤压】：如果有图，左边文字绝对不越过 5.2 英寸的红线
             text_width = 5.2 if has_chart else 9.0 
+            
             b_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(text_width), Inches(5))
             tf = b_box.text_frame
             tf.word_wrap = True
             
-            p_meta = tf.paragraphs[0]
-            p_meta.text = f"📌 来源: {news.source}  |  🕒 {news.date_check}  |  🔥 热度: {'⭐'*news.importance}"
-            p_meta.font.size = Pt(12) 
-            p_meta.font.color.rgb = RGBColor(128, 128, 128)
-            p_meta.space_after = Pt(10)
+            tf.paragraphs[0].text = f"📌 来源: {news.source}  |  🕒 {news.date_check}  |  🔥 热度: {'⭐'*news.importance}"
+            tf.paragraphs[0].font.size = Pt(12) 
+            tf.paragraphs[0].font.color.rgb = RGBColor(128, 128, 128)
+            tf.paragraphs[0].space_after = Pt(10)
             
             for line in news.summary.split('\n'):
                 line = line.strip()
@@ -179,15 +165,14 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                 p_link.font.color.rgb = RGBColor(0, 112, 192) 
                 p_link.runs[0].hyperlink.address = news_url
 
-            # 【右侧霸气图表】：从 5.8 开始，霸占 4.0 英寸的黄金位
             if has_chart:
                 try:
                     chart_img = cg.generate_and_download_chart(news.chart_info.chart_title, news.chart_info.labels, news.chart_info.values, news.chart_info.chart_type)
                     if chart_img and os.path.exists(chart_img):
-                        slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.5), width=Inches(4.0))
+                        slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.5), width=Inches(3.8))
                 except Exception: pass
 
-    # ================= 4. 竞品雷达：红蓝对抗战报页 =================
+    # ================= 竞品雷达页 =================
     if battle_data:
         layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
         slide = prs.slides.add_slide(layout)
