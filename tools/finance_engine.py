@@ -8,7 +8,7 @@ import requests
 import time
 from pydantic import BaseModel, Field
 
-# 🌟 绝杀防封杀机制：伪装成真实浏览器，突破雅虎限制
+# 🌟 伪装请求头，防封杀
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -38,35 +38,48 @@ def generate_pro_kline_chart(ticker, hist_df, filename):
         print(f"K线图生成失败: {e}")
         return None
 
+# ==========================================
+# 🚀 核心重构：带“容灾降级”的抓取引擎
+# ==========================================
 def fetch_financial_data(ai_driver, company_name):
-    prompt = f"判断【{company_name}】是否上市。若上市提供雅虎Ticker（美股直接写，A股加.SS或.SZ，港股.HK）。未上市 is_public 设为 false。"
+    # 🌟 优化 1：给大模型打预防针，强化实体识别
+    prompt = f"判断【{company_name}】是否上市（注意：Apple对应AAPL，Alphabet/Google对应GOOGL，Meta对应META）。若上市提供雅虎Ticker（美股直接写，A股加.SS或.SZ，港股.HK）。未上市(如OpenAI) is_public设为false。"
     
     try:
         ticker_info = ai_driver.analyze_structural(prompt, TickerResult)
         if not ticker_info or not ticker_info.is_public or not ticker_info.ticker:
             return {"is_public": False, "msg": "非公开市场标的"}
         
-        # 🌟 暴力重试获取数据
+        # 🌟 获取基础 K线数据 (通常不会被封杀)
         stock = yf.Ticker(ticker_info.ticker, session=session)
         hist = pd.DataFrame()
         for _ in range(3):
-            hist = stock.history(period="1mo")
-            if not hist.empty: break
+            try:
+                hist = stock.history(period="1mo")
+                if not hist.empty: break
+            except: pass
             time.sleep(1)
             
-        if hist.empty: return {"is_public": False, "msg": "雅虎财经数据源断联"}
+        if hist.empty: 
+            return {"is_public": False, "msg": "雅虎财经基础K线数据断联"}
             
-        info = stock.info
+        # 🌟 优化 2：容灾降级！单独隔离最容易报错的 info 获取
+        info = {}
+        try:
+            info = stock.info
+        except Exception as e:
+            print(f"⚠️ 雅虎云端拦截了估值数据 (info)，启动降级模式: {e}")
+            
+        # 核心价格完全从 hist 中提取，不依赖 info
         current_price = hist['Close'].iloc[-1]
-        prev_close = info.get('previousClose', hist['Close'].iloc[-2] if len(hist)>1 else current_price)
-        open_price = info.get('regularMarketOpen', hist['Open'].iloc[-1])
+        prev_close = info.get('previousClose') if info.get('previousClose') else (hist['Close'].iloc[-2] if len(hist)>1 else current_price)
+        open_price = info.get('regularMarketOpen') if info.get('regularMarketOpen') else hist['Open'].iloc[-1]
         change_pct = ((current_price - prev_close) / prev_close) * 100
         
-        # 专业估值与量化指标计算
+        # 估值数据，如果被封杀就优雅地显示 N/A
         pe_ratio = info.get('trailingPE', None)
         pb_ratio = info.get('priceToBook', None)
         
-        # 计算 ERP (假设无风险利率为 4.2%)
         erp = "N/A"
         if pe_ratio and pe_ratio > 0:
             erp_val = (1 / pe_ratio) - 0.042
@@ -78,16 +91,18 @@ def fetch_financial_data(ai_driver, company_name):
         return {
             "is_public": True,
             "ticker": ticker_info.ticker,
-            "currency": ticker_info.currency,
+            "currency": ticker_info.currency or "USD",
             "current_price": round(current_price, 2),
             "change_pct": round(change_pct, 2),
-            "open_price": round(open_price, 2) if isinstance(open_price, float) else open_price,
-            "prev_close": round(prev_close, 2) if isinstance(prev_close, float) else prev_close,
-            "pe_pb": f"PE: {pe_ratio:.2f}x | PB: {pb_ratio:.2f}x" if pe_ratio else "N/A",
+            "open_price": round(open_price, 2) if isinstance(open_price, (int, float)) else open_price,
+            "prev_close": round(prev_close, 2) if isinstance(prev_close, (int, float)) else prev_close,
+            "pe_pb": f"PE: {pe_ratio:.2f}x | PB: {pb_ratio:.2f}x" if pe_ratio else "N/A (受限)",
             "erp": erp,
             "market_cap": format_number(info.get('marketCap')),
             "range_52w": f"{info.get('fiftyTwoWeekLow', 'N/A')} - {info.get('fiftyTwoWeekHigh', 'N/A')}",
+            "volume": format_number(hist['Volume'].iloc[-1]), # 成交量也从 hist 拿，最稳！
             "chart_path": chart_path
         }
     except Exception as e:
+        print(f"金融引擎彻底崩溃: {e}")
         return {"is_public": False, "msg": f"引擎异常: {e}"}
