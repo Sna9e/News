@@ -31,7 +31,7 @@ def generate_pro_kline_chart(ticker, hist_df, filename):
         mc = mpf.make_marketcolors(up='r', down='g', edge='inherit', wick='inherit', volume='in')
         s = mpf.make_mpf_style(marketcolors=mc, gridstyle=':', y_on_right=False)
         mpf.plot(hist_df, type='candle', volume=True, mav=(5, 10, 20), style=s, 
-                 figsize=(7, 4.2), title=f"{ticker} PRO K-Line (Volume & MA)",
+                 figsize=(6.5, 3.8), title=f"{ticker} 1-Month K-Line",
                  tight_layout=True, savefig=filename)
         return filename
     except Exception as e:
@@ -62,22 +62,16 @@ def fetch_financial_data(ai_driver, company_name):
         open_price = info.get('regularMarketOpen', hist['Open'].iloc[-1])
         change_pct = ((current_price - prev_close) / prev_close) * 100
         
-        # 🌟 专业估值与量化指标计算
+        # 专业估值与量化指标计算
         pe_ratio = info.get('trailingPE', None)
         pb_ratio = info.get('priceToBook', None)
         
-        # 计算 ERP (假设 10年期无风险利率为 4.2%)
+        # 计算 ERP (假设无风险利率为 4.2%)
         erp = "N/A"
         if pe_ratio and pe_ratio > 0:
             erp_val = (1 / pe_ratio) - 0.042
             erp = f"{erp_val * 100:.2f}%"
             
-        pe_str = f"{pe_ratio:.2f}x" if pe_ratio else "N/A"
-        pb_str = f"{pb_ratio:.2f}x" if pb_ratio else "N/A"
-        
-        high_52 = info.get('fiftyTwoWeekHigh', 'N/A')
-        low_52 = info.get('fiftyTwoWeekLow', 'N/A')
-        
         chart_filename = f"kline_{ticker_info.ticker}.png"
         chart_path = generate_pro_kline_chart(ticker_info.ticker, hist, chart_filename)
         
@@ -89,10 +83,10 @@ def fetch_financial_data(ai_driver, company_name):
             "change_pct": round(change_pct, 2),
             "open_price": round(open_price, 2) if isinstance(open_price, float) else open_price,
             "prev_close": round(prev_close, 2) if isinstance(prev_close, float) else prev_close,
-            "pe_pb": f"PE: {pe_str} | PB: {pb_str}",
+            "pe_pb": f"PE: {pe_ratio:.2f}x | PB: {pb_ratio:.2f}x" if pe_ratio else "N/A",
             "erp": erp,
             "market_cap": format_number(info.get('marketCap')),
-            "range_52w": f"{low_52} - {high_52}",
+            "range_52w": f"{info.get('fiftyTwoWeekLow', 'N/A')} - {info.get('fiftyTwoWeekHigh', 'N/A')}",
             "chart_path": chart_path
         }
     except Exception as e:
