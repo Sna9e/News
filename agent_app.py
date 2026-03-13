@@ -1,7 +1,9 @@
 import streamlit as st
 import datetime
 import difflib
+import json
 from openai import OpenAI
+from pydantic import BaseModel, Field
 
 # 🔴 模块化导入
 from tools.search_engine import search_web, safe_run_async_crawler
@@ -32,7 +34,6 @@ class AI_Driver:
 
     def analyze_structural(self, prompt, structure_class):
         if not self.valid: return None
-        import json
         sys_prompt = f"必须按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         try:
             res = self.client.chat.completions.create(
@@ -45,6 +46,17 @@ class AI_Driver:
             if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
             return structure_class(**data)
         except Exception: return None
+
+# 🌟 新增：专属金融催化剂提取器 (只在 PPT 渲染金融页时使用，绝不污染正文)
+class FinanceCatalysts(BaseModel):
+    policy: str = Field(description="【政策发布】限40字。如无写'近期无重大政策催化'")
+    earnings: str = Field(description="【财报表现】限40字。如无写'未见核心财报数据发布'")
+    landmark: str = Field(description="【产业标志】限40字。如无写'产业层级平稳'")
+    style: str = Field(description="【市场风格轮动】限40字。分析资金偏好")
+
+def get_finance_catalysts(ai_driver, topic, news_text):
+    prompt = f"你是中金投研分析师。请基于以下关于【{topic}】的新闻，提炼近期二级市场的核心催化剂：\n{news_text}"
+    return ai_driver.analyze_structural(prompt, FinanceCatalysts)
 
 with st.sidebar:
     st.header("🐳 部门情报控制台")
@@ -140,9 +152,17 @@ if not st.session_state.report_ready:
                                     deduped_news.append(news)
                                     global_seen_titles.append(news.title)
                             if deduped_news:
-                                # 🌟 核心修改：把 finance_data 一并塞进大礼包里传给导出引擎
+                                # 🌟 核心增量：只为上市公司的金融页单独提取催化剂，不影响原生新闻
+                                if finance_data.get('is_public'):
+                                    st.write("🔍 正在生成机构级专属金融催化剂...")
+                                    news_summary_text = "\n".join([n.summary for n in deduped_news])
+                                    cats = get_finance_catalysts(ai, topic, news_summary_text)
+                                    if cats:
+                                        finance_data['catalysts'] = cats.model_dump()
+
+                                # 🌟 把 finance_data 一并塞进大礼包里传给导出引擎
                                 all_deep_data.append({"topic": topic, "data": deduped_news, "finance": finance_data})
-                                st.success(f"✅ 【{topic}】情报解剖完毕！")
+                                st.success(f"✅ 【{topic}】情报解剖完毕！锁定 {len(deduped_news)} 篇硬核干货。")
                                 
                                 if new_insight:
                                     mem_manager.add_topic_memory(topic, current_date_str, new_insight)
@@ -156,7 +176,7 @@ if not st.session_state.report_ready:
                         data_a = json.dumps([n.summary for n in all_deep_data[0]['data']], ensure_ascii=False)[:3000]
                         data_b = json.dumps([n.summary for n in all_deep_data[1]['data']], ensure_ascii=False)[:3000]
                         battle_report = generate_battle_card(ai, all_deep_data[0]['topic'], data_a, all_deep_data[1]['topic'], data_b, current_date_str)
-                        st.success("🏆 竞品对战结果已生成！")
+                        st.success("🏆 竞品对战结果已生成！已附录至 PPT 末尾！")
                 elif not is_battle_mode and len(all_deep_data) > 1:
                     st.info("💡 提示：本次为独立广度追踪，已为您跳过竞品对抗分析。")
 
