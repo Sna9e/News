@@ -12,7 +12,8 @@ def clear_placeholders(slide):
             sp = shape.element
             sp.getparent().remove(sp)
 
-def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
+# 🌟 已移除 battle_data 参数
+def generate_ppt(data, timeline_data, filename, model_name):
     template_path = "template.pptx"
     if os.path.exists(template_path):
         try: prs = Presentation(template_path)
@@ -59,19 +60,16 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
     for section in data:
         if not section['data']: continue
         
-        # 🌟 绝杀：金融与催化剂专属页
         finance = section.get('finance', {})
         if finance.get('is_public') and finance.get('chart_path'):
             f_slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(f_slide)
             
-            # 顶部标题
             t_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(9), Inches(0.8))
             t_box.text_frame.paragraphs[0].text = f"📊 {section['topic']} ({finance['ticker']}) - 量化面与事件催化"
             t_box.text_frame.paragraphs[0].font.size = Pt(22)
             t_box.text_frame.paragraphs[0].font.bold = True
             
-            # 【左上】硬核量化估值面板 (严格限宽，防图片重叠)
             b_box = f_slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(4.0), Inches(2.8))
             tf = b_box.text_frame
             
@@ -94,11 +92,9 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                 p.font.size = Pt(13)
                 p.space_before = Pt(12)
 
-            # 【右上】专业 K线图 (强行推到右侧，留出边界)
             if os.path.exists(finance['chart_path']):
                 f_slide.shapes.add_picture(finance['chart_path'], Inches(4.5), Inches(1.2), width=Inches(5.0))
 
-            # 【底部下半场】四维度机构级事件归因
             cat = finance.get('catalysts', {})
             boxes_data = [
                 ("🏛️ 政策与监管", cat.get('policy', "近期无重大政策催化")),
@@ -124,7 +120,6 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                 p_c.font.size = Pt(11)
                 p_c.space_before = Pt(6)
 
-        # 🌟 常规新闻分析页 (保持原有逻辑，不受污染)
         for news in section['data']:
             slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(slide) 
@@ -172,37 +167,7 @@ def generate_ppt(data, timeline_data, filename, model_name, battle_data=None):
                         slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.5), width=Inches(3.8))
                 except Exception: pass
 
-    # ================= 竞品雷达页 =================
-    if battle_data:
-        layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-        slide = prs.slides.add_slide(layout)
-        clear_placeholders(slide)
-        
-        t_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.6), Inches(9), Inches(0.8))
-        t_box.text_frame.paragraphs[0].text = "⚔️ 竞品雷达：红蓝对抗战报"
-        t_box.text_frame.paragraphs[0].font.size = Pt(26)
-        t_box.text_frame.paragraphs[0].font.bold = True
-        t_box.text_frame.paragraphs[0].font.color.rgb = RGBColor(192, 0, 0) 
-        
-        b_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.4), Inches(9), Inches(5.5))
-        tf = b_box.text_frame
-        tf.word_wrap = True
-        
-        tf.paragraphs[0].text = f"【终极推演】 {battle_data.summary}"
-        tf.paragraphs[0].font.size = Pt(16)
-        tf.paragraphs[0].font.bold = True
-        tf.paragraphs[0].space_after = Pt(15)
-        
-        for dim in battle_data.dimensions:
-            p_dim = tf.add_paragraph()
-            p_dim.text = f"🎯 对抗维度：{dim.dimension}  🏆 赢家判定：{dim.winner}"
-            p_dim.font.size = Pt(14)
-            p_dim.font.bold = True
-            p_dim.font.color.rgb = RGBColor(0, 51, 102)
-            
-            tf.add_paragraph().text = f" 🔵 蓝方动作: {dim.company_a_status}"
-            tf.add_paragraph().text = f" 🔴 红方动作: {dim.company_b_status}"
-            tf.paragraphs[-1].space_after = Pt(12)
+    # 🌟 (原来这里一大堆的竞品雷达代码，已经被彻底抹除！)
 
     path = f"{filename}.pptx"
     prs.save(path)
