@@ -14,7 +14,6 @@ from tools.memory_manager import GistMemoryManager
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
 from tools.finance_engine import fetch_financial_data
-# 🌟 引入刚写好的多智能体专家委员会
 from agents.committee_agent import run_committee_debate 
 
 st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
@@ -41,7 +40,6 @@ class AI_Driver:
         if qwen_key:
             try:
                 self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-                # 🌟 核心修复：按老板要求建立“降级容灾模型池”
                 self.qwen_models = ["qwen3.5-plus", "qwen3.5-flash", "qwen-max"] 
                 self.qwen_valid = True
             except Exception: pass
@@ -55,7 +53,6 @@ class AI_Driver:
         import json
         sys_prompt = f"必须严格按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         
-        # 🌟 如果走千问，就轮询尝试模型池；如果走 DeepSeek，就只用指定的那个
         models_to_try = getattr(self, 'qwen_models', []) if is_qwen_route else [getattr(self, 'model_id', None)]
         
         for model in models_to_try:
@@ -72,9 +69,9 @@ class AI_Driver:
                 return structure_class(**data)
             except Exception as e: 
                 print(f"⚠️ [模型 {model}] 调用失败: {e}，正在极速切换备用模型...")
-                continue # 如果 3.5-plus 挂了，立刻切到 3.5-flash！
+                continue 
                 
-        return None # 如果模型池全部阵亡，才返回空
+        return None 
 
 class FinanceCatalysts(BaseModel):
     policy: str = Field(description="【政策发布】限40字")
@@ -94,7 +91,6 @@ with st.sidebar:
         jina_key = st.secrets.get("JINA_API_KEY", "")
         gh_token = st.secrets.get("GITHUB_TOKEN", "")
         gist_id = st.secrets.get("GIST_ID", "")
-        # 🌟 获取 Qwen 密钥
         qwen_key = st.secrets.get("QWEN_API_KEY", "")
         
         st.success("🔒 部门专属安全引擎已连接")
@@ -116,7 +112,7 @@ with st.sidebar:
 st.title("🐳 商业情报战情室 (双轨完全体)")
 
 if not st.session_state.report_ready:
-    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化 & 智库会审)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
+    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化 & 智库会审)", "🌐 频道二：每日宏观行业早报 (全域扫描 & 智库会审)"])
 
     # ====================================================
     # 频道一：微观公司追踪 
@@ -125,11 +121,10 @@ if not st.session_state.report_ready:
         st.markdown("💡 **操作指南**：输入追踪对象，多个目标请使用 `\` 隔开，系统将并发执行独立分析。")
         query_input = st.text_input("输入追踪对象", "Apple \ Google")
         
-        # 🌟 核心 UI 升级：智库会审开关与权重滑块
-        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入Qwen与DeepSeek进行红白脸辩论，大幅提升研报纵深)", value=False)
+        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入Qwen与DeepSeek进行红白脸辩论，大幅提升研报纵深)", value=False, key="toggle_company")
         opt_weight = 50
         if use_multi_agent:
-            opt_weight = st.slider("⚖️ 智库总编倾向权重 (0=极度审慎看空风险, 100=极度乐观拥抱创新)", 0, 100, 50)
+            opt_weight = st.slider("⚖️ 智库总编倾向权重 (0=极度审慎看空风险, 100=极度乐观拥抱创新)", 0, 100, 50, key="slider_company")
             if not qwen_key:
                 st.warning("⚠️ 未检测到 Qwen 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
 
@@ -140,7 +135,6 @@ if not st.session_state.report_ready:
             with process_container.container():
                 topics = [t.strip() for t in query_input.split('\\') if t.strip()]
 
-                # 传入 qwen_key
                 ai = AI_Driver(api_key, model_id, qwen_key=qwen_key)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
                 
@@ -176,7 +170,6 @@ if not st.session_state.report_ready:
                                 cats = get_finance_catalysts(ai, topic, news_summary_text)
                                 if cats: finance_data['catalysts'] = cats.model_dump()
                             
-                            # 🌟 核心逻辑：如果开启了多智能体，在此处触发！
                             committee_data = None
                             if flag_ma:
                                 committee_res = run_committee_debate(ai, topic, news_text=news_summary_text, opt_weight=weight_ma)
@@ -191,7 +184,6 @@ if not st.session_state.report_ready:
                 results = []
                 with st.spinner(f"🌪️ 多端 AI 智能体正在并行工作，极速收集与推演中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        # 把 flag_ma 和 weight_ma 传给线程
                         futures = [executor.submit(process_company_task, t, i, use_multi_agent, opt_weight) for i, t in enumerate(topics)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
@@ -210,13 +202,21 @@ if not st.session_state.report_ready:
                 st.rerun()
 
     # ====================================================
-    # 频道二：宏观行业早报 (保持不变)
+    # 🌟 频道二：宏观行业早报 (完美融入多智能体智库会审)
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
         use_all_web = st.toggle("🌐 开启全网无界搜索 (打开则无视侧边栏源，进行全球广度覆盖)", value=True)
         search_domain = "" if use_all_web else sites
         
+        # 🌟 宏观频道专属的双AI控制台 (独立 key 防冲突)
+        use_multi_agent_macro = st.toggle("🤖 启用【宏观领域智库多专家会审】 (深度剖析技术瓶颈与产业未来)", value=False, key="toggle_macro")
+        opt_weight_macro = 50
+        if use_multi_agent_macro:
+            opt_weight_macro = st.slider("⚖️ 宏观趋势判定倾向 (0=极度审慎看空瓶颈, 100=极度乐观拥抱变革)", 0, 100, 50, key="slider_macro")
+            if not qwen_key:
+                st.warning("⚠️ 未检测到 Qwen 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
+
         INDUSTRY_TOPICS = [
             {"title": "AI手机与硬件承载", "queries": ["AI手机 硬件演进 2026", "智能手机内部空间 SLP 类载板", "消费电子 FPC 技术 突破"], "desc": "关注AI手机内部空间极度压缩、SLP与FPC的技术演进。"},
             {"title": "折叠与多维形态变革", "queries": ["三折叠手机 最新发布", "卷轴屏 手机 量产", "无孔化手机 Waterproof Buttonless 设计"], "desc": "关注三折叠手机、卷轴屏、以及无孔化设计的最新突破。"},
@@ -231,12 +231,13 @@ if not st.session_state.report_ready:
         if start_industry_btn and api_key and tavily_key:
             process_container = st.empty()
             with process_container.container():
-                ai = AI_Driver(api_key, model_id)
+                ai = AI_Driver(api_key, model_id, qwen_key=qwen_key)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
 
                 st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
 
-                def process_industry_task(t, index):
+                # 🌟 传入多智能体参数
+                def process_industry_task(t, index, flag_ma, weight_ma):
                     all_raw_results = []
                     seen_urls = set()
                     for query in t['queries']:
@@ -266,16 +267,25 @@ if not st.session_state.report_ready:
                             if not any(difflib.SequenceMatcher(None, n.title, s).ratio() > 0.6 for s in seen_titles):
                                 deduped_news.append(n)
                                 seen_titles.append(n.title)
+                        
                         if deduped_news:
-                            deep_data_res = {"topic": t['title'], "data": deduped_news} 
+                            # 🌟 为宏观赛道加入双AI会审
+                            committee_data = None
+                            if flag_ma:
+                                news_summary_text = "\n".join([n.summary for n in deduped_news])
+                                committee_res = run_committee_debate(ai, t['title'], news_text=news_summary_text, opt_weight=weight_ma)
+                                if committee_res: committee_data = committee_res.model_dump()
+
+                            deep_data_res = {"topic": t['title'], "data": deduped_news, "committee": committee_data} 
                             
                     t_data_res = {"topic": t['title'], "events": timeline_events} if timeline_events else None
                     return index, deep_data_res, t_data_res
 
                 results = []
-                with st.spinner("🌪️ 多路探针已发射！AI集群正在强力聚合全网数据..."):
+                with st.spinner("🌪️ 多路探针与智库评审团已发射！全域数据强力聚合中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        futures = [executor.submit(process_industry_task, t, i) for i, t in enumerate(INDUSTRY_TOPICS)]
+                        # 传入宏观频道的 flag 和 weight
+                        futures = [executor.submit(process_industry_task, t, i, use_multi_agent_macro, opt_weight_macro) for i, t in enumerate(INDUSTRY_TOPICS)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
 
