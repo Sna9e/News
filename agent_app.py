@@ -23,30 +23,51 @@ if "report_ready" not in st.session_state:
     st.session_state.ppt_path = ""
 
 class AI_Driver:
-    def __init__(self, api_key, model_id):
+    def __init__(self, api_key, model_id, qwen_key=""):
         self.valid = False
-        if not api_key: return
-        try:
-            self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-            self.model_id = model_id
-            self.valid = True
-        except Exception: pass
+        self.qwen_valid = False
+        
+        # 🟢 主力大脑：DeepSeek
+        if api_key:
+            try:
+                self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+                self.model_id = model_id
+                self.valid = True
+            except Exception: pass
+            
+        # 🔴 异构大脑：Qwen 通义千问 (做空/风控专员)
+        if qwen_key:
+            try:
+                # 阿里云 DashScope 完全兼容 OpenAI 接口
+                self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+                self.qwen_model_id = "qwen-plus" # 使用 qwen-plus，逻辑极强且性价比高
+                self.qwen_valid = True
+            except Exception: pass
 
-    def analyze_structural(self, prompt, structure_class):
-        if not self.valid: return None
-        sys_prompt = f"必须按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
+    def analyze_structural(self, prompt, structure_class, use_qwen=False):
+        # 🧠 智能路由：如果点名要求 Qwen 且配置了密钥，就走 Qwen；否则退回 DeepSeek
+        is_qwen_route = use_qwen and self.qwen_valid
+        client = self.qwen_client if is_qwen_route else getattr(self, 'client', None)
+        model = self.qwen_model_id if is_qwen_route else getattr(self, 'model_id', None)
+        
+        if not client: return None
+        
+        import json
+        sys_prompt = f"必须严格按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         try:
-            res = self.client.chat.completions.create(
-                model=self.model_id,
+            res = client.chat.completions.create(
+                model=model,
                 messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.1, max_tokens=4096 
+                temperature=0.3, # 稍微调高一点温度，激发辩论的创造力
+                max_tokens=2048 
             )
             data = json.loads(res.choices[0].message.content.strip())
             if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
             return structure_class(**data)
-        except Exception: return None
-
+        except Exception as e: 
+            print(f"AI 结构化解析异常 ({'Qwen' if is_qwen_route else 'DeepSeek'}): {e}")
+            return None
 class FinanceCatalysts(BaseModel):
     policy: str = Field(description="【政策发布】限40字。如无写'近期无重大政策催化'")
     earnings: str = Field(description="【财报表现】限40字。如无写'未见核心财报数据发布'")
