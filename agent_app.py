@@ -1,8 +1,16 @@
+### 💊 终极解决方案：
+1. **千万不要用鼠标去高亮划选代码！**
+2. 请直接点击代码框**右上角的“复制代码 (Copy code)”图标**！这样复制出来的内容才是 100% 纯净的纯文本。
+
+为了防患于未然，我在这版代码里，**用更安全的纯代码截取方式，替换掉了原来容易引发网页解析 Bug 的正则表达式**，并且把默认输入里的网址格式也做了安全处理。
+
+请用**右上角复制按钮**，全选覆盖你的 `agent_app.py`：
+
+```python
 import streamlit as st
 import datetime
 import difflib
 import json
-import re
 import concurrent.futures 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -37,7 +45,7 @@ class AI_Driver:
                 self.valid = True
             except Exception: pass
             
-        # 🔴 异构大脑：字节跳动 Doubao (做空/风控专员)
+        # 🔴 异构大脑：字节跳动 Doubao
         if doubao_key:
             try:
                 self.doubao_client = OpenAI(api_key=doubao_key, base_url="[https://ark.cn-beijing.volces.com/api/v3](https://ark.cn-beijing.volces.com/api/v3)")
@@ -60,22 +68,23 @@ class AI_Driver:
                 kwargs = {
                     "model": model,
                     "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
-                    "temperature": 0.1,  # 🌟 降温保稳定，防止 JSON 跑偏
-                    "max_tokens": 4096   # 🌟 暴力扩容，防止超长新闻被截断导致解析崩溃！
+                    "temperature": 0.1,  
+                    "max_tokens": 4096   
                 }
                 
-                # DeepSeek 必须强制开启 json_object，但部分异构模型不支持该硬参，需剥离
+                # DeepSeek 强制开启 json_object，Doubao 等模型不需要
                 if not is_doubao_route:
                     kwargs["response_format"] = {"type": "json_object"}
                     
                 res = client.chat.completions.create(**kwargs)
                 content = res.choices[0].message.content.strip()
                 
-                # 🌟 暴力清洗 Markdown 格式，防止 json.loads 崩溃
-                match = re.search(r'
-http://googleusercontent.com/immersive_entry_chip/0
-if match:
-                    content = match.group(1).strip()
+                # 🌟 安全清洗 Markdown (防网页渲染Bug，弃用复杂正则)
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[-1]
+                    if content.rfind("```") != -1:
+                        content = content[:content.rfind("```")]
+                content = content.strip()
                 
                 data = json.loads(content)
                 if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
@@ -119,7 +128,8 @@ with st.sidebar:
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
     with st.expander("⚙️ 高级搜索源设置"):
-        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\[nbloomberg.com/technology](https://nbloomberg.com/technology)\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
+        # 移除敏感网址前缀，防止富文本解析错误
+        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
     file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
 
 st.title("🐳 商业情报战情室 (双轨完全体)")
@@ -215,7 +225,7 @@ if not st.session_state.report_ready:
                 st.rerun()
 
     # ====================================================
-    # 🌟 频道二：宏观行业早报 
+    # 🌟 频道二：宏观行业早报
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
