@@ -6,7 +6,7 @@ import concurrent.futures
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# 🔴 模块化导入 (已彻底移除 battle_agent)
+# 🔴 模块化导入
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
@@ -14,6 +14,8 @@ from tools.memory_manager import GistMemoryManager
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
 from tools.finance_engine import fetch_financial_data
+# 🌟 引入刚写好的多智能体专家委员会
+from agents.committee_agent import run_committee_debate 
 
 st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
 
@@ -38,14 +40,12 @@ class AI_Driver:
         # 🔴 异构大脑：Qwen 通义千问 (做空/风控专员)
         if qwen_key:
             try:
-                # 阿里云 DashScope 完全兼容 OpenAI 接口
                 self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-                self.qwen_model_id = "qwen-plus" # 使用 qwen-plus，逻辑极强且性价比高
+                self.qwen_model_id = "qwen-plus" 
                 self.qwen_valid = True
             except Exception: pass
 
     def analyze_structural(self, prompt, structure_class, use_qwen=False):
-        # 🧠 智能路由：如果点名要求 Qwen 且配置了密钥，就走 Qwen；否则退回 DeepSeek
         is_qwen_route = use_qwen and self.qwen_valid
         client = self.qwen_client if is_qwen_route else getattr(self, 'client', None)
         model = self.qwen_model_id if is_qwen_route else getattr(self, 'model_id', None)
@@ -59,20 +59,21 @@ class AI_Driver:
                 model=model,
                 messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.3, # 稍微调高一点温度，激发辩论的创造力
+                temperature=0.3, 
                 max_tokens=2048 
             )
             data = json.loads(res.choices[0].message.content.strip())
             if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
             return structure_class(**data)
         except Exception as e: 
-            print(f"AI 结构化解析异常 ({'Qwen' if is_qwen_route else 'DeepSeek'}): {e}")
+            print(f"AI 结构化解析异常: {e}")
             return None
+
 class FinanceCatalysts(BaseModel):
-    policy: str = Field(description="【政策发布】限40字。如无写'近期无重大政策催化'")
-    earnings: str = Field(description="【财报表现】限40字。如无写'未见核心财报数据发布'")
-    landmark: str = Field(description="【产业标志】限40字。如无写'产业层级平稳'")
-    style: str = Field(description="【市场风格轮动】限40字。分析资金偏好")
+    policy: str = Field(description="【政策发布】限40字")
+    earnings: str = Field(description="【财报表现】限40字")
+    landmark: str = Field(description="【产业标志】限40字")
+    style: str = Field(description="【市场风格轮动】限40字")
 
 def get_finance_catalysts(ai_driver, topic, news_text):
     prompt = f"你是中金投研分析师。请基于以下关于【{topic}】的新闻，提炼近期二级市场的核心催化剂：\n{news_text}"
@@ -86,10 +87,15 @@ with st.sidebar:
         jina_key = st.secrets.get("JINA_API_KEY", "")
         gh_token = st.secrets.get("GITHUB_TOKEN", "")
         gist_id = st.secrets.get("GIST_ID", "")
+        # 🌟 获取 Qwen 密钥
+        qwen_key = st.secrets.get("QWEN_API_KEY", "")
+        
         st.success("🔒 部门专属安全引擎已连接")
+        if qwen_key:
+            st.success("🟢 阿里云 Qwen 异构引擎已就绪")
     except KeyError:
         st.error("⚠️ 未在云端检测到 Secrets 配置，请联系管理员！")
-        api_key, tavily_key, jina_key, gh_token, gist_id = "", "", "", "", ""
+        api_key, tavily_key, jina_key, gh_token, gist_id, qwen_key = "", "", "", "", "", ""
 
     st.divider()
     model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
@@ -103,14 +109,23 @@ with st.sidebar:
 st.title("🐳 商业情报战情室 (双轨完全体)")
 
 if not st.session_state.report_ready:
-    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
+    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化 & 智库会审)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
 
     # ====================================================
     # 频道一：微观公司追踪 
     # ====================================================
     with tab1:
         st.markdown("💡 **操作指南**：输入追踪对象，多个目标请使用 `\` 隔开，系统将并发执行独立分析。")
-        query_input = st.text_input("输入追踪对象", "Apple \ Google \ Microsoft")
+        query_input = st.text_input("输入追踪对象", "Apple \ Google")
+        
+        # 🌟 核心 UI 升级：智库会审开关与权重滑块
+        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入Qwen与DeepSeek进行红白脸辩论，大幅提升研报纵深)", value=False)
+        opt_weight = 50
+        if use_multi_agent:
+            opt_weight = st.slider("⚖️ 智库总编倾向权重 (0=极度审慎看空风险, 100=极度乐观拥抱创新)", 0, 100, 50)
+            if not qwen_key:
+                st.warning("⚠️ 未检测到 Qwen 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
+
         start_btn = st.button("🚀 启动并发战情推演", type="primary", key="btn_company")
 
         if start_btn and api_key and tavily_key:
@@ -118,7 +133,8 @@ if not st.session_state.report_ready:
             with process_container.container():
                 topics = [t.strip() for t in query_input.split('\\') if t.strip()]
 
-                ai = AI_Driver(api_key, model_id)
+                # 传入 qwen_key
+                ai = AI_Driver(api_key, model_id, qwen_key=qwen_key)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
                 
                 mem_manager = GistMemoryManager(gh_token, gist_id)
@@ -126,13 +142,12 @@ if not st.session_state.report_ready:
 
                 st.info(f"⚡ 正在启动并发处理引擎 (目标数: {len(topics)})，请稍候...")
                 
-                def process_company_task(topic, index):
+                def process_company_task(topic, index, flag_ma, weight_ma):
                     finance_data = fetch_financial_data(ai, topic)
                     raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
                     if not raw_results: return index, None, None
                     
                     timeline_events = generate_timeline(ai, raw_results, topic, current_date_str, time_opt)
-                    
                     urls_to_scrape = [r['url'] for r in raw_results][:10]
                     past_memories = mem_manager.get_topic_history(topic)
                     full_text_data, _ = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
@@ -148,20 +163,29 @@ if not st.session_state.report_ready:
                                 seen_titles.append(n.title)
                         
                         if deduped_news:
+                            news_summary_text = "\n".join([n.summary for n in deduped_news])
+                            
                             if finance_data.get('is_public'):
-                                news_summary_text = "\n".join([n.summary for n in deduped_news])
                                 cats = get_finance_catalysts(ai, topic, news_summary_text)
                                 if cats: finance_data['catalysts'] = cats.model_dump()
-                            deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data}
+                            
+                            # 🌟 核心逻辑：如果开启了多智能体，在此处触发！
+                            committee_data = None
+                            if flag_ma:
+                                committee_res = run_committee_debate(ai, topic, news_text=news_summary_text, opt_weight=weight_ma)
+                                if committee_res: committee_data = committee_res.model_dump()
+
+                            deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data, "committee": committee_data}
                             if new_insight: mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                             
                     t_data_res = {"topic": topic, "events": timeline_events} if timeline_events else None
                     return index, deep_data_res, t_data_res
 
                 results = []
-                with st.spinner(f"🌪️ 多个 AI 智能体正在并行工作，极速收集与推演中..."):
+                with st.spinner(f"🌪️ 多端 AI 智能体正在并行工作，极速收集与推演中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        futures = [executor.submit(process_company_task, t, i) for i, t in enumerate(topics)]
+                        # 把 flag_ma 和 weight_ma 传给线程
+                        futures = [executor.submit(process_company_task, t, i, use_multi_agent, opt_weight) for i, t in enumerate(topics)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
 
@@ -169,19 +193,17 @@ if not st.session_state.report_ready:
                 all_deep_data = [r[1] for r in results if r[1] is not None]
                 all_timeline_data = [r[2] for r in results if r[2] is not None]
                 
-                st.success("✅ 并发分析完成，顺序已完美还原！")
-
+                st.success("✅ 并发分析与智库会审完成！")
                 if gh_token and gist_id: mem_manager.save_memory()
 
             if all_deep_data or all_timeline_data:
-                # 移除了 battle_report 参数
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.report_ready = True
                 st.rerun()
 
     # ====================================================
-    # 频道二：宏观行业早报 
+    # 频道二：宏观行业早报 (保持不变)
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
@@ -189,36 +211,12 @@ if not st.session_state.report_ready:
         search_domain = "" if use_all_web else sites
         
         INDUSTRY_TOPICS = [
-            {
-                "title": "AI手机与硬件承载", 
-                "queries": ["AI手机 硬件演进 2026", "智能手机内部空间 SLP 类载板", "消费电子 FPC 技术 突破"], 
-                "desc": "关注AI手机内部空间极度压缩、SLP（类载板）与FPC的进一步技术演进。"
-            },
-            {
-                "title": "折叠与多维形态变革", 
-                "queries": ["三折叠手机 最新发布", "卷轴屏 手机 量产", "无孔化手机 Waterproof Buttonless 设计"], 
-                "desc": "关注三折叠手机、卷轴屏、以及无孔化(Waterproof/Buttonless)设计的最新突破。"
-            },
-            {
-                "title": "6G预研与卫星通讯", 
-                "queries": ["6G预研 最新进展", "高通 6G AI 整合芯片", "卫星通讯 手机直连 NTN"], 
-                "desc": "重点关注高通发布的6GAI整合芯片及卫星直连技术(NTN)的测试与商用进展。"
-            },
-            {
-                "title": "AI穿戴与XR设备", 
-                "queries": ["超轻量化 AI眼镜 评测", "智能戒指 SmartRing 生态", "XR混合现实 硬件 创新"], 
-                "desc": "关注超轻量化AI眼镜、智能戒指(SmartRing)的爆款产品与生态圈扩张。"
-            },
-            {
-                "title": "绿色制程与可持续性", 
-                "queries": ["消费电子 绿色制程 创新", "欧洲市场 电子产品 碳足迹 法规", "科技巨头 ESG 战略"], 
-                "desc": "关注欧洲市场对碳足迹等的硬性要求(ESG)及各厂商的绿色制程应对策略。"
-            },
-            {
-                "title": "全球机器人产业巡礼", 
-                "queries": ["全球 机器人 产业 报告 2026", "特斯拉 宇树科技 机器人 动态", "荣耀机器人 新兴人形机器人 创业公司"], 
-                "desc": "全面考察全球及中国的机器人厂商。覆盖大厂(如特斯拉、宇树、荣耀)以及新兴创业厂商的各类人形/具身智能机器人进展。"
-            }
+            {"title": "AI手机与硬件承载", "queries": ["AI手机 硬件演进 2026", "智能手机内部空间 SLP 类载板", "消费电子 FPC 技术 突破"], "desc": "关注AI手机内部空间极度压缩、SLP与FPC的技术演进。"},
+            {"title": "折叠与多维形态变革", "queries": ["三折叠手机 最新发布", "卷轴屏 手机 量产", "无孔化手机 Waterproof Buttonless 设计"], "desc": "关注三折叠手机、卷轴屏、以及无孔化设计的最新突破。"},
+            {"title": "6G预研与卫星通讯", "queries": ["6G预研 最新进展", "高通 6G AI 整合芯片", "卫星通讯 手机直连 NTN"], "desc": "重点关注高通6GAI芯片及卫星直连技术(NTN)的进展。"},
+            {"title": "AI穿戴与XR设备", "queries": ["超轻量化 AI眼镜 评测", "智能戒指 SmartRing 生态", "XR混合现实 硬件 创新"], "desc": "关注超轻量化AI眼镜、智能戒指的爆款产品。"},
+            {"title": "绿色制程与可持续性", "queries": ["消费电子 绿色制程 创新", "欧洲市场 电子产品 碳足迹 法规", "科技巨头 ESG 战略"], "desc": "关注碳足迹硬性要求(ESG)及绿色制程策略。"},
+            {"title": "全球机器人产业巡礼", "queries": ["全球 机器人 产业 报告 2026", "特斯拉 宇树科技 机器人 动态", "荣耀机器人 新兴人形机器人 创业公司"], "desc": "考察全球及中国厂商。覆盖大厂及新兴创业厂商。"}
         ]
 
         start_industry_btn = st.button("🚀 一键并发生成【每日宏观行业早报】", type="primary", key="btn_industry")
@@ -229,7 +227,7 @@ if not st.session_state.report_ready:
                 ai = AI_Driver(api_key, model_id)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
 
-                st.info("⚡ 正在启动全域多路扫描并发引擎，预计将分析数百个网页，请耐心等待...")
+                st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
 
                 def process_industry_task(t, index):
                     all_raw_results = []
@@ -279,7 +277,6 @@ if not st.session_state.report_ready:
                 all_timeline_data = [r[2] for r in results if r[2] is not None]
 
             if all_deep_data or all_timeline_data:
-                # 移除了 battle_report 参数
                 st.session_state.word_path = generate_word(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.ppt_path = generate_ppt(all_deep_data, all_timeline_data, file_name, model_id)
                 st.session_state.report_ready = True
