@@ -24,9 +24,9 @@ if "report_ready" not in st.session_state:
     st.session_state.ppt_path = ""
 
 class AI_Driver:
-    def __init__(self, api_key, model_id, qwen_key=""):
+    def __init__(self, api_key, model_id, doubao_key=""):
         self.valid = False
-        self.qwen_valid = False
+        self.doubao_valid = False
         
         # 🟢 主力大脑：DeepSeek
         if api_key:
@@ -36,25 +36,26 @@ class AI_Driver:
                 self.valid = True
             except Exception: pass
             
-        # 🔴 异构大脑：Qwen 通义千问
-        if qwen_key:
+        # 🔴 异构大脑：字节跳动 Doubao (做空/风控专员)
+        if doubao_key:
             try:
-                self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-                # 🌟 核心修改：使用老板指定的最新测试模型池
-                self.qwen_models = ["qvq-max-2025-03-25", "qwen-math-turbo"] 
-                self.qwen_valid = True
+                # 🌟 接入火山引擎 OpenAI 兼容接口
+                self.doubao_client = OpenAI(api_key=doubao_key, base_url="https://ark.cn-beijing.volces.com/api/v3")
+                # 🌟 老板指定的容灾模型池 (Pro 首发，Lite 兜底)
+                self.doubao_models = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"] 
+                self.doubao_valid = True
             except Exception: pass
 
-    def analyze_structural(self, prompt, structure_class, use_qwen=False):
-        is_qwen_route = use_qwen and self.qwen_valid
-        client = self.qwen_client if is_qwen_route else getattr(self, 'client', None)
+    def analyze_structural(self, prompt, structure_class, use_doubao=False):
+        is_doubao_route = use_doubao and self.doubao_valid
+        client = self.doubao_client if is_doubao_route else getattr(self, 'client', None)
         
         if not client: return None
         
         import json
         sys_prompt = f"必须严格按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         
-        models_to_try = getattr(self, 'qwen_models', []) if is_qwen_route else [getattr(self, 'model_id', None)]
+        models_to_try = getattr(self, 'doubao_models', []) if is_doubao_route else [getattr(self, 'model_id', None)]
         
         for model in models_to_try:
             try:
@@ -69,8 +70,7 @@ class AI_Driver:
                 if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
                 return structure_class(**data)
             except Exception as e: 
-                # 打印极度详细的错误日志，方便排查
-                print(f"⚠️ [Qwen模型 {model}] 调用失败: {e} | 正在极速切换备用模型...")
+                print(f"⚠️ [Doubao模型 {model}] 调用失败: {e} | 正在极速切换备用模型...")
                 continue 
                 
         return None 
@@ -93,14 +93,15 @@ with st.sidebar:
         jina_key = st.secrets.get("JINA_API_KEY", "")
         gh_token = st.secrets.get("GITHUB_TOKEN", "")
         gist_id = st.secrets.get("GIST_ID", "")
-        qwen_key = st.secrets.get("QWEN_API_KEY", "")
+        # 🌟 获取 Doubao 密钥
+        doubao_key = st.secrets.get("DOUBAO_API_KEY", "")
         
         st.success("🔒 部门专属安全引擎已连接")
-        if qwen_key:
-            st.success("🟢 阿里云 Qwen 异构引擎已就绪")
+        if doubao_key:
+            st.success("🔴 火山引擎 Doubao 异构已就绪")
     except KeyError:
         st.error("⚠️ 未在云端检测到 Secrets 配置，请联系管理员！")
-        api_key, tavily_key, jina_key, gh_token, gist_id, qwen_key = "", "", "", "", "", ""
+        api_key, tavily_key, jina_key, gh_token, gist_id, doubao_key = "", "", "", "", "", ""
 
     st.divider()
     model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
@@ -123,12 +124,12 @@ if not st.session_state.report_ready:
         st.markdown("💡 **操作指南**：输入追踪对象，多个目标请使用 `\` 隔开，系统将并发执行独立分析。")
         query_input = st.text_input("输入追踪对象", "Apple \ Google")
         
-        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入Qwen与DeepSeek进行红白脸辩论，大幅提升研报纵深)", value=False, key="toggle_company")
+        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入 Doubao 与 DeepSeek 进行红白脸辩论，大幅提升研报纵深)", value=False, key="toggle_company")
         opt_weight = 50
         if use_multi_agent:
             opt_weight = st.slider("⚖️ 智库总编倾向权重 (0=极度审慎看空风险, 100=极度乐观拥抱创新)", 0, 100, 50, key="slider_company")
-            if not qwen_key:
-                st.warning("⚠️ 未检测到 Qwen 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
+            if not doubao_key:
+                st.warning("⚠️ 未检测到 Doubao 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
 
         start_btn = st.button("🚀 启动并发战情推演", type="primary", key="btn_company")
 
@@ -137,7 +138,7 @@ if not st.session_state.report_ready:
             with process_container.container():
                 topics = [t.strip() for t in query_input.split('\\') if t.strip()]
 
-                ai = AI_Driver(api_key, model_id, qwen_key=qwen_key)
+                ai = AI_Driver(api_key, model_id, doubao_key=doubao_key)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
                 
                 mem_manager = GistMemoryManager(gh_token, gist_id)
@@ -204,7 +205,7 @@ if not st.session_state.report_ready:
                 st.rerun()
 
     # ====================================================
-    # 🌟 频道二：宏观行业早报 (完美融入多智能体智库会审)
+    # 🌟 频道二：宏观行业早报
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
@@ -215,8 +216,8 @@ if not st.session_state.report_ready:
         opt_weight_macro = 50
         if use_multi_agent_macro:
             opt_weight_macro = st.slider("⚖️ 宏观趋势判定倾向 (0=极度审慎看空瓶颈, 100=极度乐观拥抱变革)", 0, 100, 50, key="slider_macro")
-            if not qwen_key:
-                st.warning("⚠️ 未检测到 Qwen 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
+            if not doubao_key:
+                st.warning("⚠️ 未检测到 Doubao 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
 
         INDUSTRY_TOPICS = [
             {"title": "AI手机与硬件承载", "queries": ["AI手机 硬件演进 2026", "智能手机内部空间 SLP 类载板", "消费电子 FPC 技术 突破"], "desc": "关注AI手机内部空间极度压缩、SLP与FPC的技术演进。"},
@@ -232,7 +233,7 @@ if not st.session_state.report_ready:
         if start_industry_btn and api_key and tavily_key:
             process_container = st.empty()
             with process_container.container():
-                ai = AI_Driver(api_key, model_id, qwen_key=qwen_key)
+                ai = AI_Driver(api_key, model_id, doubao_key=doubao_key)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
 
                 st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
