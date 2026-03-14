@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import difflib
 import json
+import re
 import concurrent.futures 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -31,7 +32,7 @@ class AI_Driver:
         # 🟢 主力大脑：DeepSeek
         if api_key:
             try:
-                self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+                self.client = OpenAI(api_key=api_key, base_url="[https://api.deepseek.com](https://api.deepseek.com)")
                 self.model_id = model_id
                 self.valid = True
             except Exception: pass
@@ -39,9 +40,7 @@ class AI_Driver:
         # 🔴 异构大脑：字节跳动 Doubao (做空/风控专员)
         if doubao_key:
             try:
-                # 🌟 接入火山引擎 OpenAI 兼容接口
-                self.doubao_client = OpenAI(api_key=doubao_key, base_url="https://ark.cn-beijing.volces.com/api/v3")
-                # 🌟 老板指定的容灾模型池 (Pro 首发，Lite 兜底)
+                self.doubao_client = OpenAI(api_key=doubao_key, base_url="[https://ark.cn-beijing.volces.com/api/v3](https://ark.cn-beijing.volces.com/api/v3)")
                 self.doubao_models = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"] 
                 self.doubao_valid = True
             except Exception: pass
@@ -52,25 +51,37 @@ class AI_Driver:
         
         if not client: return None
         
-        import json
-        sys_prompt = f"必须严格按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
+        sys_prompt = f"必须严格按 JSON 格式返回，不要带有任何思考过程或多余文字。JSON Schema 如下:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         
         models_to_try = getattr(self, 'doubao_models', []) if is_doubao_route else [getattr(self, 'model_id', None)]
         
         for model in models_to_try:
             try:
-                res = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.3, 
-                    max_tokens=2048 
-                )
-                data = json.loads(res.choices[0].message.content.strip())
+                kwargs = {
+                    "model": model,
+                    "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
+                    "temperature": 0.1,  # 🌟 降温保稳定，防止 JSON 跑偏
+                    "max_tokens": 4096   # 🌟 暴力扩容，防止超长新闻被截断导致解析崩溃！
+                }
+                
+                # DeepSeek 必须强制开启 json_object，但部分异构模型不支持该硬参，需剥离
+                if not is_doubao_route:
+                    kwargs["response_format"] = {"type": "json_object"}
+                    
+                res = client.chat.completions.create(**kwargs)
+                content = res.choices[0].message.content.strip()
+                
+                # 🌟 暴力清洗 Markdown 格式，防止 json.loads 崩溃
+                match = re.search(r'
+http://googleusercontent.com/immersive_entry_chip/0
+if match:
+                    content = match.group(1).strip()
+                
+                data = json.loads(content)
                 if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
                 return structure_class(**data)
             except Exception as e: 
-                print(f"⚠️ [Doubao模型 {model}] 调用失败: {e} | 正在极速切换备用模型...")
+                print(f"⚠️ [模型 {model}] 调用或解析失败: {e} | 正在尝试备选方案...")
                 continue 
                 
         return None 
@@ -93,7 +104,6 @@ with st.sidebar:
         jina_key = st.secrets.get("JINA_API_KEY", "")
         gh_token = st.secrets.get("GITHUB_TOKEN", "")
         gist_id = st.secrets.get("GIST_ID", "")
-        # 🌟 获取 Doubao 密钥
         doubao_key = st.secrets.get("DOUBAO_API_KEY", "")
         
         st.success("🔒 部门专属安全引擎已连接")
@@ -109,7 +119,7 @@ with st.sidebar:
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
     with st.expander("⚙️ 高级搜索源设置"):
-        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
+        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\[nbloomberg.com/technology](https://nbloomberg.com/technology)\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
     file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
 
 st.title("🐳 商业情报战情室 (双轨完全体)")
@@ -205,7 +215,7 @@ if not st.session_state.report_ready:
                 st.rerun()
 
     # ====================================================
-    # 🌟 频道二：宏观行业早报
+    # 🌟 频道二：宏观行业早报 
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
