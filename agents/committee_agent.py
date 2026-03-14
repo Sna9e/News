@@ -22,10 +22,6 @@ class CommitteeResult(BaseModel):
 # 🎭 多智能体协同辩论引擎 (科技进展与市场动向)
 # ==========================================
 def run_committee_debate(ai_driver, topic, news_text, opt_weight):
-    """
-    opt_weight: 0 到 100 之间的整数 (Optimism Weight)。
-    0 代表极度审慎/挑剔，100 代表极度看好/乐观，50 代表绝对中立。
-    """
     if not news_text or len(news_text) < 50: return None
 
     # 🟢 智能体 1：创新战略官 (默认使用 DeepSeek)
@@ -36,9 +32,9 @@ def run_committee_debate(ai_driver, topic, news_text, opt_weight):
         尽情释放你的科技乐观主义，找出它的创新飞轮！
         新闻素材：\n{news_text}
         """
-        return ai_driver.analyze_structural(prompt, TechProReport, use_qwen=False)
+        return ai_driver.analyze_structural(prompt, TechProReport, use_doubao=False)
 
-    # 🔴 智能体 2：产业风控官 (优先使用 Qwen，严谨挑刺)
+    # 🔴 智能体 2：产业风控官 (优先使用 Doubao 豆包，严谨挑刺)
     def run_con():
         prompt = f"""
         你是全球顶尖科技智库里的【首席产业风控官 (Tech Skeptic)】。
@@ -46,7 +42,7 @@ def run_committee_debate(ai_driver, topic, news_text, opt_weight):
         你要做的是疯狂“找茬”，给狂热的科技泡沫泼冷水，指出硬核缺陷！
         新闻素材：\n{news_text}
         """
-        return ai_driver.analyze_structural(prompt, TechConReport, use_qwen=True)
+        return ai_driver.analyze_structural(prompt, TechConReport, use_doubao=True)
 
     # ⚡ 并发执行：红白脸同时开工，速度翻倍
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -75,5 +71,5 @@ def run_committee_debate(ai_driver, topic, news_text, opt_weight):
     总结陈词：{con_res.summary}
     """
     
-    final_res = ai_driver.analyze_structural(judge_prompt, CommitteeResult, use_qwen=False)
+    final_res = ai_driver.analyze_structural(judge_prompt, CommitteeResult, use_doubao=False)
     return final_res
