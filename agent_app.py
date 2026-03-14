@@ -36,11 +36,12 @@ class AI_Driver:
                 self.valid = True
             except Exception: pass
             
-        # 🔴 异构大脑：Qwen 通义千问 (做空/风控专员)
+        # 🔴 异构大脑：Qwen 通义千问
         if qwen_key:
             try:
                 self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-                self.qwen_models = ["qwen3.5-plus", "qwen3.5-flash", "qwen-max"] 
+                # 🌟 核心修改：使用老板指定的最新测试模型池
+                self.qwen_models = ["qvq-max-2025-03-25", "qwen-math-turbo"] 
                 self.qwen_valid = True
             except Exception: pass
 
@@ -68,7 +69,8 @@ class AI_Driver:
                 if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
                 return structure_class(**data)
             except Exception as e: 
-                print(f"⚠️ [模型 {model}] 调用失败: {e}，正在极速切换备用模型...")
+                # 打印极度详细的错误日志，方便排查
+                print(f"⚠️ [Qwen模型 {model}] 调用失败: {e} | 正在极速切换备用模型...")
                 continue 
                 
         return None 
@@ -209,7 +211,6 @@ if not st.session_state.report_ready:
         use_all_web = st.toggle("🌐 开启全网无界搜索 (打开则无视侧边栏源，进行全球广度覆盖)", value=True)
         search_domain = "" if use_all_web else sites
         
-        # 🌟 宏观频道专属的双AI控制台 (独立 key 防冲突)
         use_multi_agent_macro = st.toggle("🤖 启用【宏观领域智库多专家会审】 (深度剖析技术瓶颈与产业未来)", value=False, key="toggle_macro")
         opt_weight_macro = 50
         if use_multi_agent_macro:
@@ -236,7 +237,6 @@ if not st.session_state.report_ready:
 
                 st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
 
-                # 🌟 传入多智能体参数
                 def process_industry_task(t, index, flag_ma, weight_ma):
                     all_raw_results = []
                     seen_urls = set()
@@ -269,7 +269,6 @@ if not st.session_state.report_ready:
                                 seen_titles.append(n.title)
                         
                         if deduped_news:
-                            # 🌟 为宏观赛道加入双AI会审
                             committee_data = None
                             if flag_ma:
                                 news_summary_text = "\n".join([n.summary for n in deduped_news])
@@ -284,7 +283,6 @@ if not st.session_state.report_ready:
                 results = []
                 with st.spinner("🌪️ 多路探针与智库评审团已发射！全域数据强力聚合中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        # 传入宏观频道的 flag 和 weight
                         futures = [executor.submit(process_industry_task, t, i, use_multi_agent_macro, opt_weight_macro) for i, t in enumerate(INDUSTRY_TOPICS)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
