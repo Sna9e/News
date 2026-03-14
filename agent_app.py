@@ -41,33 +41,40 @@ class AI_Driver:
         if qwen_key:
             try:
                 self.qwen_client = OpenAI(api_key=qwen_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-                self.qwen_model_id = "qwen-plus" 
+                # 🌟 核心修复：按老板要求建立“降级容灾模型池”
+                self.qwen_models = ["qwen3.5-plus", "qwen3.5-flash", "qwen-max"] 
                 self.qwen_valid = True
             except Exception: pass
 
     def analyze_structural(self, prompt, structure_class, use_qwen=False):
         is_qwen_route = use_qwen and self.qwen_valid
         client = self.qwen_client if is_qwen_route else getattr(self, 'client', None)
-        model = self.qwen_model_id if is_qwen_route else getattr(self, 'model_id', None)
         
         if not client: return None
         
         import json
         sys_prompt = f"必须严格按 JSON Schema 返回:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
-        try:
-            res = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.3, 
-                max_tokens=2048 
-            )
-            data = json.loads(res.choices[0].message.content.strip())
-            if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
-            return structure_class(**data)
-        except Exception as e: 
-            print(f"AI 结构化解析异常: {e}")
-            return None
+        
+        # 🌟 如果走千问，就轮询尝试模型池；如果走 DeepSeek，就只用指定的那个
+        models_to_try = getattr(self, 'qwen_models', []) if is_qwen_route else [getattr(self, 'model_id', None)]
+        
+        for model in models_to_try:
+            try:
+                res = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.3, 
+                    max_tokens=2048 
+                )
+                data = json.loads(res.choices[0].message.content.strip())
+                if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
+                return structure_class(**data)
+            except Exception as e: 
+                print(f"⚠️ [模型 {model}] 调用失败: {e}，正在极速切换备用模型...")
+                continue # 如果 3.5-plus 挂了，立刻切到 3.5-flash！
+                
+        return None # 如果模型池全部阵亡，才返回空
 
 class FinanceCatalysts(BaseModel):
     policy: str = Field(description="【政策发布】限40字")
