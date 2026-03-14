@@ -150,13 +150,13 @@ def generate_ppt(data, timeline_data, filename, model_name):
                 p.font.size = Pt(13)
                 p.space_before = Pt(8)
 
-            # 【右侧】红色阵营：产业风控官 (Qwen主笔)
+           # 【右侧】红色阵营：产业风控官 (Doubao主笔)
             con_box = c_slide.shapes.add_textbox(Inches(5.0), Inches(1.3), Inches(4.3), Inches(3.5))
             con_tf = con_box.text_frame
             con_tf.word_wrap = True
             
             p_con_title = con_tf.paragraphs[0]
-            p_con_title.text = "🔴 产业风控官 (隐患与瓶颈)"
+            p_con_title.text = "🔴 产业风控官 (Doubao主笔)"
             p_con_title.font.size = Pt(16)
             p_con_title.font.bold = True
             p_con_title.font.color.rgb = RGBColor(192, 0, 0)
