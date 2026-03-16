@@ -27,7 +27,7 @@ class MapReport(BaseModel):
 
 # 🌟 最终汇报结构
 class NewsReport(BaseModel):
-    overall_insight: str = Field(default="近期无重大异动", description="100字以内的全局核心摘要，概括本次所有情报的最核心结论")
+    overall_insight: str = Field(default="近期无重大异动", description="200字以内的全局核心摘要，概括本次所有情报的最核心结论")
     news: List[NewsItem] = Field(default_factory=list, description="新闻列表")
 
 def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, past_memories_string=""):
@@ -62,7 +62,7 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
     combined_json = json.dumps([item.model_dump() for item in all_extracted_news], ensure_ascii=False)
 
     if "24" in time_opt:
-        detail_prompt = "要求每条新闻约 600 字。必须强行提取：具体的数字（融资金额、股价等）、核心原话、微小动作细节。"
+        detail_prompt = "要求每条新闻约 600 字。必须强行提取：具体的数字（融资金额、股价等）、核心原话、微小动作细节。事件概述不少于200字，不得少于整体篇幅的1/3."
     else:
         detail_prompt = "要求每条新闻约 300 字。侧重于宏观趋势、战略意图的分析。"
 
@@ -81,7 +81,7 @@ def map_reduce_analysis(ai_driver, topic, full_text, current_date, time_opt, pas
         {detail_prompt}
         ⚠️ 极其重要：如果今天的新情报与【你的历史记忆库】存在延续性、推进或重大反转，请务必在【事件核心】中以“前情回顾”的口吻明确指出并进行对比！
         📊 极其重要：如果新闻中出现了明显的数据对比（如金额、份额、增速等），请务必准确提取到 chart_info 中，我们将利用这些数据调用可视化 API 进行画图！
-        4. 提炼 overall_insight（100字以内），记录今天的核心结论。
+        4. 提炼 overall_insight（200字以内），记录今天的核心结论。
         5. 最多保留最核心的5条。
     """
     
