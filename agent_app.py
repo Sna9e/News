@@ -92,13 +92,14 @@ with st.sidebar:
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
     with st.expander("⚙️ 高级搜索源设置"):
-       sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
-     file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
+        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
+    
+    file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
 
 st.title("🐳 商业情报战情室 (双轨完全体)")
 
 if not st.session_state.report_ready:
-    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
+    tab1, tab2 = st.tabs(["🏢 频道一：科技公司追踪", "🌐 频道二：选定主题咨询搜集"])
 
     # ====================================================
     # 频道一：微观公司追踪 
@@ -148,7 +149,6 @@ if not st.session_state.report_ready:
                                 cats = get_finance_catalysts(ai, topic, news_summary_text)
                                 if cats: finance_data['catalysts'] = cats.model_dump()
                             
-                            # 已移除 committee 参数传递
                             deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data}
                             if new_insight: mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                             
@@ -189,7 +189,7 @@ if not st.session_state.report_ready:
             {"title": "6G预研与卫星通讯", "queries": ["6G预研 最新进展", "高通 6G AI 整合芯片", "卫星通讯 手机直连 NTN"], "desc": "重点关注高通6GAI芯片及卫星直连技术(NTN)的进展。"},
             {"title": "AI穿戴与XR设备", "queries": ["超轻量化 AI眼镜 评测", "智能戒指 SmartRing 生态", "XR混合现实 硬件 创新"], "desc": "关注超轻量化AI眼镜、智能戒指的爆款产品。"},
             {"title": "绿色制程与可持续性", "queries": ["消费电子 绿色制程 创新", "欧洲市场 电子产品 碳足迹 法规", "科技巨头 ESG 战略"], "desc": "关注碳足迹硬性要求(ESG)及绿色制程策略。"},
-            {"title": "全球机器人产业巡礼", "queries": ["全球 机器人 产业 报告 2026", "特斯拉 宇树科技 机器人 动态", "荣耀机器人 新兴人形机器人 创业公司"], "desc": "考察全球及中国厂商。覆盖大厂及新兴创业厂商。"}
+            {"title": "全球机器人产业巡礼", "queries": ["全球 机器人 产业 报告 2026", "特斯拉 宇树科技 机器人 动态", "荣耀机器人 新兴人形机器人 机器人创业公司"], "desc": "考察全球及中国厂商。覆盖大厂及新兴创业厂商。"}
         ]
 
         start_industry_btn = st.button("🚀 一键并发生成【每日宏观行业早报】", type="primary", key="btn_industry")
@@ -234,7 +234,6 @@ if not st.session_state.report_ready:
                                 seen_titles.append(n.title)
                         
                         if deduped_news:
-                            # 纯净输出，不带 committee
                             deep_data_res = {"topic": t['title'], "data": deduped_news} 
                             
                     t_data_res = {"topic": t['title'], "events": timeline_events} if timeline_events else None
@@ -266,7 +265,7 @@ else:
             st.download_button("📝 立即下载深度研报 (Word)", f, file_name=st.session_state.word_path, type="secondary", use_container_width=True)
     with col2:
         with open(st.session_state.ppt_path, "rb") as f:
-            st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
+            st.download_button("📊 立即下载研究简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
     st.divider()
     if st.button("🔄 开启新一轮情报探索", use_container_width=True):
         st.session_state.report_ready = False
