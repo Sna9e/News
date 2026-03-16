@@ -12,6 +12,7 @@ def clear_placeholders(slide):
             sp = shape.element
             sp.getparent().remove(sp)
 
+# 🌟 已移除 battle_data 参数
 def generate_ppt(data, timeline_data, filename, model_name):
     template_path = "template.pptx"
     if os.path.exists(template_path):
@@ -119,7 +120,6 @@ def generate_ppt(data, timeline_data, filename, model_name):
                 p_c.font.size = Pt(11)
                 p_c.space_before = Pt(6)
 
-        # 纯净新闻页
         for news in section['data']:
             slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(slide) 
@@ -166,6 +166,8 @@ def generate_ppt(data, timeline_data, filename, model_name):
                     if chart_img and os.path.exists(chart_img):
                         slide.shapes.add_picture(chart_img, Inches(5.8), Inches(1.5), width=Inches(3.8))
                 except Exception: pass
+
+    # 🌟 (原来这里一大堆的竞品雷达代码，已经被彻底抹除！)
 
     path = f"{filename}.pptx"
     prs.save(path)
