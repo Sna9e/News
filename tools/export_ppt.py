@@ -119,72 +119,7 @@ def generate_ppt(data, timeline_data, filename, model_name):
                 p_c.font.size = Pt(11)
                 p_c.space_before = Pt(6)
 
-        # ====================================================
-        # 🌟 全新大招：智库多专家会审辩论排版页
-        # ====================================================
-        committee = section.get('committee')
-        if committee:
-            c_slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
-            clear_placeholders(c_slide)
-
-            # 顶部标题
-            t_box = c_slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(9), Inches(0.8))
-            t_box.text_frame.paragraphs[0].text = f"⚖️ {section['topic']} - 科技智库多专家深度会审"
-            t_box.text_frame.paragraphs[0].font.size = Pt(24)
-            t_box.text_frame.paragraphs[0].font.bold = True
-
-            # 【左侧】绿色阵营：创新战略官 (DeepSeek主笔)
-            pro_box = c_slide.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(4.3), Inches(3.5))
-            pro_tf = pro_box.text_frame
-            pro_tf.word_wrap = True
-            
-            p_pro_title = pro_tf.paragraphs[0]
-            p_pro_title.text = "🟢 创新战略官 (突破与潜力)"
-            p_pro_title.font.size = Pt(16)
-            p_pro_title.font.bold = True
-            p_pro_title.font.color.rgb = RGBColor(0, 128, 0)
-
-            for pt in committee.get('pro_points', []):
-                p = pro_tf.add_paragraph()
-                p.text = f"• {pt}"
-                p.font.size = Pt(13)
-                p.space_before = Pt(8)
-
-           # 【右侧】红色阵营：产业风控官 (Doubao主笔)
-            con_box = c_slide.shapes.add_textbox(Inches(5.0), Inches(1.3), Inches(4.3), Inches(3.5))
-            con_tf = con_box.text_frame
-            con_tf.word_wrap = True
-            
-            p_con_title = con_tf.paragraphs[0]
-            p_con_title.text = "🔴 产业风控官 (Doubao主笔)"
-            p_con_title.font.size = Pt(16)
-            p_con_title.font.bold = True
-            p_con_title.font.color.rgb = RGBColor(192, 0, 0)
-
-            for pt in committee.get('con_points', []):
-                p = con_tf.add_paragraph()
-                p.text = f"• {pt}"
-                p.font.size = Pt(13)
-                p.space_before = Pt(8)
-
-            # 【底部】智库总编的最终决断 (带权重倾向)
-            verdict_box = c_slide.shapes.add_textbox(Inches(0.5), Inches(5.2), Inches(8.8), Inches(1.8))
-            verdict_tf = verdict_box.text_frame
-            verdict_tf.word_wrap = True
-            
-            p_v_title = verdict_tf.paragraphs[0]
-            p_v_title.text = "🏛️ 智库总编最终评估决断："
-            p_v_title.font.size = Pt(15)
-            p_v_title.font.bold = True
-            p_v_title.font.color.rgb = RGBColor(0, 51, 102)
-
-            p_v_content = verdict_tf.add_paragraph()
-            p_v_content.text = committee.get('chief_verdict', '')
-            p_v_content.font.size = Pt(13)
-            p_v_content.line_spacing = 1.1
-            p_v_content.space_before = Pt(6)
-
-        # 常规新闻页保持不变
+        # 纯净新闻页
         for news in section['data']:
             slide = prs.slides.add_slide(prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0])
             clear_placeholders(slide) 
