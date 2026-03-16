@@ -6,7 +6,7 @@ import concurrent.futures
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# 🔴 模块化导入
+# 🔴 模块化导入 (已彻底移除 committee_agent)
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
@@ -14,7 +14,6 @@ from tools.memory_manager import GistMemoryManager
 from agents.deep_analyst import map_reduce_analysis
 from agents.timeline_agent import generate_timeline
 from tools.finance_engine import fetch_financial_data
-from agents.committee_agent import run_committee_debate 
 
 st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🐳", layout="wide")
 
@@ -23,68 +22,46 @@ if "report_ready" not in st.session_state:
     st.session_state.word_path = ""
     st.session_state.ppt_path = ""
 
+# 🌟 极简且极其稳定的单脑驱动
 class AI_Driver:
-    def __init__(self, api_key, model_id, doubao_key=""):
+    def __init__(self, api_key, model_id):
         self.valid = False
-        self.doubao_valid = False
-        
-        # 🟢 主力大脑：DeepSeek
         if api_key:
             try:
-                self.client = OpenAI(api_key=api_key, base_url="[https://api.deepseek.com](https://api.deepseek.com)")
+                self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
                 self.model_id = model_id
                 self.valid = True
             except Exception: pass
-            
-        # 🔴 异构大脑：字节跳动 Doubao
-        if doubao_key:
-            try:
-                self.doubao_client = OpenAI(api_key=doubao_key, base_url="[https://ark.cn-beijing.volces.com/api/v3](https://ark.cn-beijing.volces.com/api/v3)")
-                self.doubao_models = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"] 
-                self.doubao_valid = True
-            except Exception: pass
 
-    def analyze_structural(self, prompt, structure_class, use_doubao=False):
-        is_doubao_route = use_doubao and self.doubao_valid
-        client = self.doubao_client if is_doubao_route else getattr(self, 'client', None)
+    def analyze_structural(self, prompt, structure_class):
+        if not self.valid: return None
         
-        if not client: return None
-        
+        # 保留了强力的防御提示词
         sys_prompt = f"必须严格按 JSON 格式返回，不要带有任何思考过程或多余文字。JSON Schema 如下:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         
-        models_to_try = getattr(self, 'doubao_models', []) if is_doubao_route else [getattr(self, 'model_id', None)]
-        
-        for model in models_to_try:
-            try:
-                kwargs = {
-                    "model": model,
-                    "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
-                    "temperature": 0.1,  
-                    "max_tokens": 4096   
-                }
-                
-                # DeepSeek 强制开启 json_object，Doubao 等模型不需要
-                if not is_doubao_route:
-                    kwargs["response_format"] = {"type": "json_object"}
-                    
-                res = client.chat.completions.create(**kwargs)
-                content = res.choices[0].message.content.strip()
-                
-                # 🌟 安全清洗 Markdown (防网页渲染Bug，弃用复杂正则)
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[-1]
-                    if content.rfind("```") != -1:
-                        content = content[:content.rfind("```")]
-                content = content.strip()
-                
-                data = json.loads(content)
-                if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
-                return structure_class(**data)
-            except Exception as e: 
-                print(f"⚠️ [模型 {model}] 调用或解析失败: {e} | 正在尝试备选方案...")
-                continue 
-                
-        return None 
+        try:
+            res = self.client.chat.completions.create(
+                model=self.model_id,
+                messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1,  # 保持冷静，防止乱造 JSON
+                max_tokens=4096   # 保持扩容，防止长新闻被截断
+            )
+            content = res.choices[0].message.content.strip()
+            
+            # 安全清洗 Markdown 代码块，防止网页渲染和 JSON 解析报错
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1]
+                if content.rfind("```") != -1:
+                    content = content[:content.rfind("```")]
+            content = content.strip()
+            
+            data = json.loads(content)
+            if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
+            return structure_class(**data)
+        except Exception as e: 
+            print(f"⚠️ AI 结构化解析失败: {e}")
+            return None 
 
 class FinanceCatalysts(BaseModel):
     policy: str = Field(description="【政策发布】限40字")
@@ -104,14 +81,10 @@ with st.sidebar:
         jina_key = st.secrets.get("JINA_API_KEY", "")
         gh_token = st.secrets.get("GITHUB_TOKEN", "")
         gist_id = st.secrets.get("GIST_ID", "")
-        doubao_key = st.secrets.get("DOUBAO_API_KEY", "")
-        
         st.success("🔒 部门专属安全引擎已连接")
-        if doubao_key:
-            st.success("🔴 火山引擎 Doubao 异构已就绪")
     except KeyError:
         st.error("⚠️ 未在云端检测到 Secrets 配置，请联系管理员！")
-        api_key, tavily_key, jina_key, gh_token, gist_id, doubao_key = "", "", "", "", "", ""
+        api_key, tavily_key, jina_key, gh_token, gist_id = "", "", "", "", ""
 
     st.divider()
     model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
@@ -119,14 +92,13 @@ with st.sidebar:
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
     
     with st.expander("⚙️ 高级搜索源设置"):
-        # 移除敏感网址前缀，防止富文本解析错误
-        sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
-    file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
+       sites = st.text_area("重点搜索源", "techcrunch.com\ntheverge.com\nengadget.com\ncnet.com\nbloomberg.com/technology\nelectrek.co\ninsideevs.com\nroadtovr.com\nuploadvr.com\n36kr.com\nithome.com\nhuxiu.com\ngeekpark.net\nvrtuoluo.cn\nd1ev.com", height=250)
+     file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
 
 st.title("🐳 商业情报战情室 (双轨完全体)")
 
 if not st.session_state.report_ready:
-    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化 & 智库会审)", "🌐 频道二：每日宏观行业早报 (全域扫描 & 智库会审)"])
+    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
 
     # ====================================================
     # 频道一：微观公司追踪 
@@ -135,13 +107,6 @@ if not st.session_state.report_ready:
         st.markdown("💡 **操作指南**：输入追踪对象，多个目标请使用 `\` 隔开，系统将并发执行独立分析。")
         query_input = st.text_input("输入追踪对象", "Apple \ Google")
         
-        use_multi_agent = st.toggle("🤖 启用【多智能体智库会审】 (引入 Doubao 与 DeepSeek 进行红白脸辩论，大幅提升研报纵深)", value=False, key="toggle_company")
-        opt_weight = 50
-        if use_multi_agent:
-            opt_weight = st.slider("⚖️ 智库总编倾向权重 (0=极度审慎看空风险, 100=极度乐观拥抱创新)", 0, 100, 50, key="slider_company")
-            if not doubao_key:
-                st.warning("⚠️ 未检测到 Doubao 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
-
         start_btn = st.button("🚀 启动并发战情推演", type="primary", key="btn_company")
 
         if start_btn and api_key and tavily_key:
@@ -149,7 +114,7 @@ if not st.session_state.report_ready:
             with process_container.container():
                 topics = [t.strip() for t in query_input.split('\\') if t.strip()]
 
-                ai = AI_Driver(api_key, model_id, doubao_key=doubao_key)
+                ai = AI_Driver(api_key, model_id)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
                 
                 mem_manager = GistMemoryManager(gh_token, gist_id)
@@ -157,7 +122,7 @@ if not st.session_state.report_ready:
 
                 st.info(f"⚡ 正在启动并发处理引擎 (目标数: {len(topics)})，请稍候...")
                 
-                def process_company_task(topic, index, flag_ma, weight_ma):
+                def process_company_task(topic, index):
                     finance_data = fetch_financial_data(ai, topic)
                     raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
                     if not raw_results: return index, None, None
@@ -178,27 +143,22 @@ if not st.session_state.report_ready:
                                 seen_titles.append(n.title)
                         
                         if deduped_news:
-                            news_summary_text = "\n".join([n.summary for n in deduped_news])
-                            
                             if finance_data.get('is_public'):
+                                news_summary_text = "\n".join([n.summary for n in deduped_news])
                                 cats = get_finance_catalysts(ai, topic, news_summary_text)
                                 if cats: finance_data['catalysts'] = cats.model_dump()
                             
-                            committee_data = None
-                            if flag_ma:
-                                committee_res = run_committee_debate(ai, topic, news_text=news_summary_text, opt_weight=weight_ma)
-                                if committee_res: committee_data = committee_res.model_dump()
-
-                            deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data, "committee": committee_data}
+                            # 已移除 committee 参数传递
+                            deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data}
                             if new_insight: mem_manager.add_topic_memory(topic, current_date_str, new_insight)
                             
                     t_data_res = {"topic": topic, "events": timeline_events} if timeline_events else None
                     return index, deep_data_res, t_data_res
 
                 results = []
-                with st.spinner(f"🌪️ 多端 AI 智能体正在并行工作，极速收集与推演中..."):
+                with st.spinner(f"🌪️ 正在并行收集与深度推演中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        futures = [executor.submit(process_company_task, t, i, use_multi_agent, opt_weight) for i, t in enumerate(topics)]
+                        futures = [executor.submit(process_company_task, t, i) for i, t in enumerate(topics)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
 
@@ -206,7 +166,7 @@ if not st.session_state.report_ready:
                 all_deep_data = [r[1] for r in results if r[1] is not None]
                 all_timeline_data = [r[2] for r in results if r[2] is not None]
                 
-                st.success("✅ 并发分析与智库会审完成！")
+                st.success("✅ 并发深度分析完成！")
                 if gh_token and gist_id: mem_manager.save_memory()
 
             if all_deep_data or all_timeline_data:
@@ -216,20 +176,13 @@ if not st.session_state.report_ready:
                 st.rerun()
 
     # ====================================================
-    # 🌟 频道二：宏观行业早报
+    # 频道二：宏观行业早报
     # ====================================================
     with tab2:
         st.markdown("💡 **本频道专为宏观视野打造**：一键搜集全球6大前沿科技领域最新进展，**多路并发，全域扫描**。")
         use_all_web = st.toggle("🌐 开启全网无界搜索 (打开则无视侧边栏源，进行全球广度覆盖)", value=True)
         search_domain = "" if use_all_web else sites
         
-        use_multi_agent_macro = st.toggle("🤖 启用【宏观领域智库多专家会审】 (深度剖析技术瓶颈与产业未来)", value=False, key="toggle_macro")
-        opt_weight_macro = 50
-        if use_multi_agent_macro:
-            opt_weight_macro = st.slider("⚖️ 宏观趋势判定倾向 (0=极度审慎看空瓶颈, 100=极度乐观拥抱变革)", 0, 100, 50, key="slider_macro")
-            if not doubao_key:
-                st.warning("⚠️ 未检测到 Doubao 密钥，辩论将完全由 DeepSeek 左右脑互搏完成。")
-
         INDUSTRY_TOPICS = [
             {"title": "AI手机与硬件承载", "queries": ["AI手机 硬件演进 2026", "智能手机内部空间 SLP 类载板", "消费电子 FPC 技术 突破"], "desc": "关注AI手机内部空间极度压缩、SLP与FPC的技术演进。"},
             {"title": "折叠与多维形态变革", "queries": ["三折叠手机 最新发布", "卷轴屏 手机 量产", "无孔化手机 Waterproof Buttonless 设计"], "desc": "关注三折叠手机、卷轴屏、以及无孔化设计的最新突破。"},
@@ -244,12 +197,12 @@ if not st.session_state.report_ready:
         if start_industry_btn and api_key and tavily_key:
             process_container = st.empty()
             with process_container.container():
-                ai = AI_Driver(api_key, model_id, doubao_key=doubao_key)
+                ai = AI_Driver(api_key, model_id)
                 current_date_str = datetime.date.today().strftime("%Y年%m月%d日")
 
                 st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
 
-                def process_industry_task(t, index, flag_ma, weight_ma):
+                def process_industry_task(t, index):
                     all_raw_results = []
                     seen_urls = set()
                     for query in t['queries']:
@@ -281,21 +234,16 @@ if not st.session_state.report_ready:
                                 seen_titles.append(n.title)
                         
                         if deduped_news:
-                            committee_data = None
-                            if flag_ma:
-                                news_summary_text = "\n".join([n.summary for n in deduped_news])
-                                committee_res = run_committee_debate(ai, t['title'], news_text=news_summary_text, opt_weight=weight_ma)
-                                if committee_res: committee_data = committee_res.model_dump()
-
-                            deep_data_res = {"topic": t['title'], "data": deduped_news, "committee": committee_data} 
+                            # 纯净输出，不带 committee
+                            deep_data_res = {"topic": t['title'], "data": deduped_news} 
                             
                     t_data_res = {"topic": t['title'], "events": timeline_events} if timeline_events else None
                     return index, deep_data_res, t_data_res
 
                 results = []
-                with st.spinner("🌪️ 多路探针与智库评审团已发射！全域数据强力聚合中..."):
+                with st.spinner("🌪️ 多路探针已发射！全域数据强力聚合中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                        futures = [executor.submit(process_industry_task, t, i, use_multi_agent_macro, opt_weight_macro) for i, t in enumerate(INDUSTRY_TOPICS)]
+                        futures = [executor.submit(process_industry_task, t, i) for i, t in enumerate(INDUSTRY_TOPICS)]
                         for future in concurrent.futures.as_completed(futures):
                             results.append(future.result())
 
