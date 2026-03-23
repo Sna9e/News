@@ -6,7 +6,14 @@ import requests
 import time
 import re
 import yfinance as yf
+import logging
+import warnings
 from pydantic import BaseModel, Field
+
+# ==========================================
+# 屏蔽 yfinance 在 Streamlit 后台的恼人报错
+# ==========================================
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ==========================================
 # 🛡️ 机构级本地高频词典 (防大模型幻觉，秒级映射)
@@ -51,82 +58,74 @@ def _extract_ticker_from_input(company_name: str) -> str:
     if not raw:
         return ""
     upper = raw.upper()
-    # Prefer explicit ticker-like inputs (uppercase or with dot).
     if re.fullmatch(r"[A-Z]{1,6}(\.[A-Z]{1,2})?", upper) and (raw.isupper() or "." in raw):
         return upper
     if re.fullmatch(r"\d{4,5}\.HK", upper):
         return upper
-    # Accept ticker provided in parentheses, e.g. "Apple (AAPL)".
     m = re.search(r"\(([A-Z]{1,6}(?:\.[A-Z]{1,2})?)\)", raw)
     if m:
         return m.group(1).upper()
     return ""
 
 def fetch_from_yfinance(ticker_code):
-    ticker = yf.Ticker(ticker_code)
-
-    hist_df = None
+    # 使用 try-except 彻底包裹 yfinance，防止 401 错误击穿 Streamlit
     try:
-        hist_df = ticker.history(period="1mo", interval="1d", auto_adjust=False)
-    except Exception as e:
-        print(f"Yahoo Finance 鏃跺簭鏁版嵁鎷夊彇澶辫触: {e}")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ticker = yf.Ticker(ticker_code)
 
-    info = {}
-    try:
-        info = ticker.info or {}
-    except Exception as e:
-        print(f"Yahoo Finance 涓诲拰鏁版嵁鎷夊彇澶辫触: {e}")
+            hist_df = ticker.history(period="1mo", interval="1d", auto_adjust=False)
+            info = ticker.info or {}
 
-    if (hist_df is None or hist_df.empty) and not info:
+            if (hist_df is None or hist_df.empty) and not info:
+                return None
+
+            current_price = _safe_float(info.get("regularMarketPrice"))
+            prev_close = _safe_float(info.get("regularMarketPreviousClose"))
+            open_price = _safe_float(info.get("regularMarketOpen"))
+
+            if current_price is None and hist_df is not None and not hist_df.empty:
+                current_price = _safe_float(hist_df["Close"].iloc[-1])
+            if prev_close is None and hist_df is not None and len(hist_df) >= 2:
+                prev_close = _safe_float(hist_df["Close"].iloc[-2])
+
+            change_pct = None
+            if current_price is not None and prev_close not in (None, 0):
+                change_pct = (current_price - prev_close) / prev_close * 100
+
+            pe = _safe_float(info.get("trailingPE") or info.get("forwardPE"))
+            pb = _safe_float(info.get("priceToBook"))
+            erp = f"{((1 / pe) - 0.042) * 100:.2f}%" if pe and pe > 0 else "N/A"
+
+            market_cap = info.get("marketCap")
+            volume = info.get("regularMarketVolume")
+            if volume is None and hist_df is not None and not hist_df.empty:
+                volume = hist_df["Volume"].iloc[-1]
+
+            low_52w = info.get("fiftyTwoWeekLow", "N/A")
+            high_52w = info.get("fiftyTwoWeekHigh", "N/A")
+            currency = info.get("currency", "USD")
+
+            chart_path = None
+            if hist_df is not None and not hist_df.empty:
+                chart_path = generate_pro_kline_chart(ticker_code, hist_df, f"kline_{ticker_code}.png")
+
+            return {
+                "is_public": True, "data_available": True, "data_source": "yfinance",
+                "ticker": ticker_code, "currency": currency,
+                "current_price": round(current_price, 2) if current_price is not None else "N/A",
+                "change_pct": round(change_pct, 2) if change_pct is not None else None,
+                "open_price": round(open_price, 2) if open_price is not None else "N/A",
+                "prev_close": round(prev_close, 2) if prev_close is not None else "N/A",
+                "pe_pb": f"PE: {pe:.2f}x | PB: {pb:.2f}x" if pe else "N/A",
+                "erp": erp, "market_cap": format_number(market_cap),
+                "range_52w": f"{low_52w} - {high_52w}", "volume": format_number(volume),
+                "chart_path": chart_path,
+            }
+    except Exception as e:
+        # 静默捕获所有 yfinance 错误 (包括 401 Crumb)，无缝交给下一个引擎
+        print(f"yfinance 无响应或报 401 错误，已静默跳过: {ticker_code}")
         return None
-
-    current_price = _safe_float(info.get("regularMarketPrice"))
-    prev_close = _safe_float(info.get("regularMarketPreviousClose"))
-    open_price = _safe_float(info.get("regularMarketOpen"))
-
-    if current_price is None and hist_df is not None and not hist_df.empty:
-        current_price = _safe_float(hist_df["Close"].iloc[-1])
-    if prev_close is None and hist_df is not None and len(hist_df) >= 2:
-        prev_close = _safe_float(hist_df["Close"].iloc[-2])
-
-    change_pct = None
-    if current_price is not None and prev_close not in (None, 0):
-        change_pct = (current_price - prev_close) / prev_close * 100
-
-    pe = _safe_float(info.get("trailingPE") or info.get("forwardPE"))
-    pb = _safe_float(info.get("priceToBook"))
-    erp = f"{((1 / pe) - 0.042) * 100:.2f}%" if pe and pe > 0 else "N/A"
-
-    market_cap = info.get("marketCap")
-    volume = info.get("regularMarketVolume")
-    if volume is None and hist_df is not None and not hist_df.empty:
-        volume = hist_df["Volume"].iloc[-1]
-
-    low_52w = info.get("fiftyTwoWeekLow", "N/A")
-    high_52w = info.get("fiftyTwoWeekHigh", "N/A")
-    currency = info.get("currency", "USD")
-
-    chart_path = None
-    if hist_df is not None and not hist_df.empty:
-        chart_path = generate_pro_kline_chart(ticker_code, hist_df, f"kline_{ticker_code}.png")
-
-    return {
-        "is_public": True,
-        "data_available": True,
-        "data_source": "yfinance",
-        "ticker": ticker_code,
-        "currency": currency,
-        "current_price": round(current_price, 2) if current_price is not None else "N/A",
-        "change_pct": round(change_pct, 2) if change_pct is not None else None,
-        "open_price": round(open_price, 2) if open_price is not None else "N/A",
-        "prev_close": round(prev_close, 2) if prev_close is not None else "N/A",
-        "pe_pb": f"PE: {pe:.2f}x | PB: {pb:.2f}x" if pe else "N/A",
-        "erp": erp,
-        "market_cap": format_number(market_cap),
-        "range_52w": f"{low_52w} - {high_52w}",
-        "volume": format_number(volume),
-        "chart_path": chart_path,
-    }
 
 def generate_pro_kline_chart(ticker, hist_df, filename):
     if hist_df is None or hist_df.empty: return None
@@ -146,14 +145,12 @@ def generate_pro_kline_chart(ticker, hist_df, filename):
 # ==========================================
 def fetch_from_tencent(ticker_code):
     try:
-        # 1. 自动转换代码为腾讯格式 (usAAPL, hk00700, sh600519)
         symbol = ticker_code.upper()
         if symbol.endswith('.HK'): t_sym = 'hk' + symbol.replace('.HK', '').zfill(5)
         elif symbol.endswith('.SS'): t_sym = 'sh' + symbol.replace('.SS', '')
         elif symbol.endswith('.SZ'): t_sym = 'sz' + symbol.replace('.SZ', '')
         else: t_sym = 'us' + symbol
 
-        # 2. 毫秒级抓取 30 日 K 线数据
         url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={t_sym},day,,,30,qfq"
         res = requests.get(url, timeout=5).json()
         
@@ -174,7 +171,6 @@ def fetch_from_tencent(ticker_code):
             })
         hist_df = pd.DataFrame(df_data).set_index("Date")
 
-        # 3. 毫秒级抓取全维度盘面估值数据
         qt_url = f"http://qt.gtimg.cn/q={t_sym}"
         qt_res = requests.get(qt_url, timeout=5).text
         parts = qt_res.split('~')
@@ -185,9 +181,7 @@ def fetch_from_tencent(ticker_code):
         open_price = float(parts[5])
         change_pct = float(parts[32])
         
-        # 腾讯的美股成交量是以股为单位，A/港股是手
         volume = float(parts[36]) * 100 if not t_sym.startswith('us') else float(parts[36])
-        # 腾讯市值单位是“亿”
         market_cap = float(parts[45]) * 100000000 if parts[45] else 0
         pe = float(parts[39]) if parts[39] else None
         pb = float(parts[46]) if parts[46] else None
@@ -198,18 +192,13 @@ def fetch_from_tencent(ticker_code):
         chart_path = generate_pro_kline_chart(ticker_code, hist_df, f"kline_{ticker_code}.png")
 
         return {
-            "is_public": True,
-            "data_available": True,
-            "data_source": "tencent",
-            "ticker": ticker_code,
-            "currency": currency,
+            "is_public": True, "data_available": True, "data_source": "tencent",
+            "ticker": ticker_code, "currency": currency,
             "current_price": round(current_price, 2), "change_pct": round(change_pct, 2),
             "open_price": round(open_price, 2), "prev_close": round(prev_close, 2),
             "pe_pb": f"PE: {pe:.2f}x | PB: {pb:.2f}x" if pe else "N/A",
-            "erp": erp,
-            "market_cap": format_number(market_cap),
-            "range_52w": f"{parts[34]} - {parts[33]}",
-            "volume": format_number(volume),
+            "erp": erp, "market_cap": format_number(market_cap),
+            "range_52w": f"{parts[34]} - {parts[33]}", "volume": format_number(volume),
             "chart_path": chart_path
         }
     except Exception as e:
@@ -228,7 +217,7 @@ def fetch_from_xueqiu(ticker_code):
         
         session = requests.Session()
         session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-        session.get("https://xueqiu.com/", timeout=5) # 拿 Cookie
+        session.get("https://xueqiu.com/", timeout=5) 
         
         q_res = session.get(f"https://stock.xueqiu.com/v5/stock/quote.json?symbol={symbol}", timeout=5).json()
         quote = q_res.get('data', {}).get('quote', {})
@@ -247,11 +236,8 @@ def fetch_from_xueqiu(ticker_code):
         chart_path = generate_pro_kline_chart(ticker_code, hist_df, f"kline_{ticker_code}.png")
         
         return {
-            "is_public": True,
-            "data_available": True,
-            "data_source": "xueqiu",
-            "ticker": ticker_code,
-            "currency": quote.get('currency', 'USD'),
+            "is_public": True, "data_available": True, "data_source": "xueqiu",
+            "ticker": ticker_code, "currency": quote.get('currency', 'USD'),
             "current_price": round(quote.get('current', 0), 2), "change_pct": round(quote.get('percent', 0), 2),
             "open_price": round(quote.get('open', 0), 2), "prev_close": round(quote.get('last_close', 0), 2),
             "pe_pb": f"PE: {pe:.2f}x | PB: {quote.get('pb', 0):.2f}x" if pe else "N/A",
@@ -266,11 +252,6 @@ def fetch_from_xueqiu(ticker_code):
 # ==========================================
 # 🧠 总调度长：三级降落伞，不死不休
 # ==========================================
-def _prefer_tencent(ticker_code: str) -> bool:
-    upper = (ticker_code or "").upper()
-    return upper.endswith((".SS", ".SZ", ".HK"))
-
-
 def fetch_financial_data(ai_driver, company_name):
     company_key = (company_name or "").lower().strip()
     ticker_code = ""
@@ -305,17 +286,12 @@ def fetch_financial_data(ai_driver, company_name):
 
     ticker_code = ticker_code.upper().strip()
 
+    # 核心修改：将 yfinance 优先级降到最低，全面优先使用腾讯和雪球
     source_chain = [
-        ("yfinance", fetch_from_yfinance),
         ("tencent", fetch_from_tencent),
         ("xueqiu", fetch_from_xueqiu),
+        ("yfinance", fetch_from_yfinance), 
     ]
-    if _prefer_tencent(ticker_code):
-        source_chain = [
-            ("tencent", fetch_from_tencent),
-            ("yfinance", fetch_from_yfinance),
-            ("xueqiu", fetch_from_xueqiu),
-        ]
 
     for name, fn in source_chain:
         print(f"Fetching {ticker_code} via {name} ...")
@@ -325,20 +301,10 @@ def fetch_financial_data(ai_driver, company_name):
 
     print(f"All data sources unavailable for {ticker_code}.")
     return {
-        "is_public": True,
-        "data_available": False,
-        "data_source": "unavailable",
-        "ticker": ticker_code,
-        "currency": "",
-        "msg": "No data source available",
-        "current_price": "N/A",
-        "change_pct": None,
-        "open_price": "N/A",
-        "prev_close": "N/A",
-        "pe_pb": "N/A",
-        "erp": "N/A",
-        "market_cap": "N/A",
-        "range_52w": "N/A",
-        "volume": "N/A",
+        "is_public": True, "data_available": False, "data_source": "unavailable",
+        "ticker": ticker_code, "currency": "", "msg": "No data source available",
+        "current_price": "N/A", "change_pct": None, "open_price": "N/A",
+        "prev_close": "N/A", "pe_pb": "N/A", "erp": "N/A",
+        "market_cap": "N/A", "range_52w": "N/A", "volume": "N/A",
         "chart_path": None,
     }
