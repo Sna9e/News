@@ -1,6 +1,10 @@
-import requests
 import urllib.parse
 import os
+
+try:
+    import requests
+except Exception:
+    requests = None
 
 def generate_and_download_chart(title, labels, values, chart_type="bar", filename="temp_chart.png"):
     """
@@ -34,6 +38,9 @@ def generate_and_download_chart(title, labels, values, chart_type="bar", filenam
     # 拼接 API 请求地址 (高分辨率，去掉背景)
     url = f"https://quickchart.io/chart?c={encoded_config}&w=600&h=350&bkg=transparent&retina=true"
     
+    if requests is None:
+        return None
+
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:

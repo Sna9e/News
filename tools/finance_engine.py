@@ -1,19 +1,40 @@
-import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import mplfinance as mpf
-import requests
-import time
-import re
-import yfinance as yf
 import logging
+import re
+import time
 import warnings
 from pydantic import BaseModel, Field
+
+try:
+    import requests
+except Exception:
+    requests = None
+
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except Exception:
+    matplotlib = None
+
+try:
+    import mplfinance as mpf
+except Exception:
+    mpf = None
+
+try:
+    import yfinance as yf
+except Exception:
+    yf = None
 
 # ==========================================
 # 屏蔽 yfinance 在 Streamlit 后台的恼人报错
 # ==========================================
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+if yf is not None:
+    logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ==========================================
 # 🛡️ 机构级本地高频词典 (防大模型幻觉，秒级映射)
@@ -36,7 +57,10 @@ class TickerResult(BaseModel):
     currency: str = Field(default="", description="货币")
 
 def format_number(num):
-    if num is None or pd.isna(num) or num == 0: return 'N/A'
+    if num is None or num == 0:
+        return 'N/A'
+    if pd is not None and pd.isna(num):
+        return 'N/A'
     try:
         num = float(num)
         if num >= 1e12: return f"{num/1e12:.2f}万亿"
@@ -47,7 +71,9 @@ def format_number(num):
 
 def _safe_float(value):
     try:
-        if value is None or pd.isna(value):
+        if value is None:
+            return None
+        if pd is not None and pd.isna(value):
             return None
         return float(value)
     except (TypeError, ValueError):
@@ -68,6 +94,9 @@ def _extract_ticker_from_input(company_name: str) -> str:
     return ""
 
 def fetch_from_yfinance(ticker_code):
+    if yf is None:
+        return None
+
     # 使用 try-except 彻底包裹 yfinance，防止 401 错误击穿 Streamlit
     try:
         with warnings.catch_warnings():
@@ -128,7 +157,10 @@ def fetch_from_yfinance(ticker_code):
         return None
 
 def generate_pro_kline_chart(ticker, hist_df, filename):
-    if hist_df is None or hist_df.empty: return None
+    if mpf is None:
+        return None
+    if hist_df is None or not hasattr(hist_df, "empty") or hist_df.empty:
+        return None
     try:
         mc = mpf.make_marketcolors(up='r', down='g', edge='inherit', wick='inherit', volume='in')
         s = mpf.make_mpf_style(marketcolors=mc, gridstyle=':', y_on_right=False)
@@ -144,6 +176,9 @@ def generate_pro_kline_chart(ticker, hist_df, filename):
 # 💥 引擎 1：腾讯财经 (永不封杀的底层神级接口)
 # ==========================================
 def fetch_from_tencent(ticker_code):
+    if pd is None or requests is None:
+        return None
+
     try:
         symbol = ticker_code.upper()
         if symbol.endswith('.HK'): t_sym = 'hk' + symbol.replace('.HK', '').zfill(5)
@@ -151,7 +186,7 @@ def fetch_from_tencent(ticker_code):
         elif symbol.endswith('.SZ'): t_sym = 'sz' + symbol.replace('.SZ', '')
         else: t_sym = 'us' + symbol
 
-        url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={t_sym},day,,,30,qfq"
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={t_sym},day,,,30,qfq"
         res = requests.get(url, timeout=5).json()
         
         if res['code'] != 0 or t_sym not in res['data']: return None
@@ -171,10 +206,10 @@ def fetch_from_tencent(ticker_code):
             })
         hist_df = pd.DataFrame(df_data).set_index("Date")
 
-        qt_url = f"http://qt.gtimg.cn/q={t_sym}"
-        qt_res = requests.get(qt_url, timeout=5).text
+        qt_url = f"https://qt.gtimg.cn/q={t_sym}"
+        qt_res = requests.get(qt_url, timeout=5).content.decode("gbk", errors="ignore")
         parts = qt_res.split('~')
-        if len(parts) < 45: return None
+        if len(parts) < 47: return None
 
         current_price = float(parts[3])
         prev_close = float(parts[4])
@@ -209,6 +244,9 @@ def fetch_from_tencent(ticker_code):
 # 🛡️ 引擎 2：雪球 (备用通道)
 # ==========================================
 def fetch_from_xueqiu(ticker_code):
+    if pd is None or requests is None:
+        return None
+
     try:
         symbol = ticker_code.upper()
         if symbol.endswith('.HK'): symbol = symbol.replace('.HK', '').zfill(5)
