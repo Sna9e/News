@@ -6,7 +6,7 @@ import concurrent.futures
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# 🔴 模块化导入 (已彻底移除 committee_agent)
+# 🔴 模块化导入 (已彻底移除多模型，保留最稳定的经典架构)
 from tools.search_engine import search_web, safe_run_async_crawler
 from tools.export_word import generate_word
 from tools.export_ppt import generate_ppt
@@ -36,7 +36,6 @@ class AI_Driver:
     def analyze_structural(self, prompt, structure_class):
         if not self.valid: return None
         
-        # 保留了强力的防御提示词
         sys_prompt = f"必须严格按 JSON 格式返回，不要带有任何思考过程或多余文字。JSON Schema 如下:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
         
         try:
@@ -44,17 +43,16 @@ class AI_Driver:
                 model=self.model_id,
                 messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.1,  # 保持冷静，防止乱造 JSON
-                max_tokens=4096   # 保持扩容，防止长新闻被截断
+                temperature=0.1,  
+                max_tokens=4096   
             )
             content = res.choices[0].message.content.strip()
             
-            # 安全清洗 Markdown 代码块，防止网页渲染和 JSON 解析报错
+            # 🌟 终极安全净化：纯字符串操作，不使用正则，剥离所有可能的 markdown 包裹
             if content.startswith("```"):
-                content = content.split("\n", 1)[-1]
-                if content.rfind("```") != -1:
-                    content = content[:content.rfind("```")]
-            content = content.strip()
+                content = content.strip("`").strip()
+                if content.lower().startswith("json"):
+                    content = content[4:].strip()
             
             data = json.loads(content)
             if isinstance(data, list): data = {list(structure_class.model_fields.keys())[0]: data}
@@ -72,6 +70,26 @@ class FinanceCatalysts(BaseModel):
 def get_finance_catalysts(ai_driver, topic, news_text):
     prompt = f"你是中金投研分析师。请基于以下关于【{topic}】的新闻，提炼近期二级市场的核心催化剂：\n{news_text}"
     return ai_driver.analyze_structural(prompt, FinanceCatalysts)
+
+def finance_fallback_payload(msg="Finance engine temporarily unavailable"):
+    return {
+        "is_public": False,
+        "data_available": False,
+        "data_source": "fallback",
+        "ticker": "",
+        "currency": "",
+        "msg": msg,
+        "current_price": "N/A",
+        "change_pct": None,
+        "open_price": "N/A",
+        "prev_close": "N/A",
+        "pe_pb": "N/A",
+        "erp": "N/A",
+        "market_cap": "N/A",
+        "range_52w": "N/A",
+        "volume": "N/A",
+        "chart_path": None,
+    }
 
 with st.sidebar:
     st.header("🐳 部门情报控制台")
@@ -96,10 +114,10 @@ with st.sidebar:
     
     file_name = st.text_input("导出文件名", f"高管战报_{datetime.date.today()}")
 
-st.title("🐳 商业情报战情室 (双轨完全体)")
+st.title("🐳 商业情报战情室 (双轨稳定兜底版)")
 
 if not st.session_state.report_ready:
-    tab1, tab2 = st.tabs(["🏢 频道一：科技公司追踪", "🌐 频道二：选定主题咨询搜集"])
+    tab1, tab2 = st.tabs(["🏢 频道一：公司追踪 (带金融量化)", "🌐 频道二：每日宏观行业早报 (全域扫描)"])
 
     # ====================================================
     # 频道一：微观公司追踪 
@@ -124,43 +142,68 @@ if not st.session_state.report_ready:
                 st.info(f"⚡ 正在启动并发处理引擎 (目标数: {len(topics)})，请稍候...")
                 
                 def process_company_task(topic, index):
-                    finance_data = fetch_financial_data(ai, topic)
-                    raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
-                    if not raw_results: return index, None, None
-                    
-                    timeline_events = generate_timeline(ai, raw_results, topic, current_date_str, time_opt)
-                    urls_to_scrape = [r['url'] for r in raw_results][:10]
-                    past_memories = mem_manager.get_topic_history(topic)
-                    full_text_data, _ = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
-                    final_news_list, new_insight = map_reduce_analysis(ai, topic, full_text_data, current_date_str, time_opt, past_memories)
-                    
-                    deep_data_res = None
-                    if final_news_list:
-                        deduped_news = []
-                        seen_titles = []
-                        for n in final_news_list:
-                            if not any(difflib.SequenceMatcher(None, n.title, s).ratio() > 0.6 for s in seen_titles):
-                                deduped_news.append(n)
-                                seen_titles.append(n.title)
+                    try:
+                        # 先做搜索，确保关键 API 调用不被 finance 链路阻断
+                        raw_results = search_web(topic, sites, time_limit_dict[time_opt], max_results=20, tavily_key=tavily_key)
+                        if not raw_results:
+                            return index, None, None
                         
-                        if deduped_news:
-                            if finance_data.get('is_public'):
-                                news_summary_text = "\n".join([n.summary for n in deduped_news])
-                                cats = get_finance_catalysts(ai, topic, news_summary_text)
-                                if cats: finance_data['catalysts'] = cats.model_dump()
+                        timeline_events = generate_timeline(ai, raw_results, topic, current_date_str, time_opt)
+                        urls_to_scrape = [r.get('url') for r in raw_results if r.get('url')][:10]
+                        past_memories = mem_manager.get_topic_history(topic)
+                        
+                        # 尝试抓取长文本
+                        full_text_data, _ = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
+                        
+                        # 🌟 核心救命稻草：如果 Jina 爬虫被墙，强行使用搜索摘要兜底！绝不让文本为空！
+                        if len(full_text_data) < 500:
+                            print(f"⚠️ {topic} 长文本抓取失败或被拦截，启动摘要降级模式！")
+                            snippets = [f"标题:{r.get('title')} | 内容:{r.get('content')} | 链接:{r.get('url')}" for r in raw_results]
+                            full_text_data = "\n\n".join(snippets)
+
+                        final_news_list, new_insight = map_reduce_analysis(ai, topic, full_text_data, current_date_str, time_opt, past_memories)
+                        
+                        deep_data_res = None
+                        if final_news_list:
+                            deduped_news = []
+                            seen_titles = []
+                            for n in final_news_list:
+                                if not any(difflib.SequenceMatcher(None, n.title, s).ratio() > 0.6 for s in seen_titles):
+                                    deduped_news.append(n)
+                                    seen_titles.append(n.title)
                             
-                            deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data}
-                            if new_insight: mem_manager.add_topic_memory(topic, current_date_str, new_insight)
-                            
-                    t_data_res = {"topic": topic, "events": timeline_events} if timeline_events else None
-                    return index, deep_data_res, t_data_res
+                            if deduped_news:
+                                try:
+                                    finance_data = fetch_financial_data(ai, topic) or finance_fallback_payload()
+                                except Exception as e:
+                                    print(f"⚠️ Finance chain failed for {topic}: {e}")
+                                    finance_data = finance_fallback_payload(f"Finance chain failed: {e}")
+
+                                if finance_data.get('is_public'):
+                                    news_summary_text = "\n".join([n.summary for n in deduped_news])
+                                    cats = get_finance_catalysts(ai, topic, news_summary_text)
+                                    if cats: finance_data['catalysts'] = cats.model_dump()
+                                
+                                deep_data_res = {"topic": topic, "data": deduped_news, "finance": finance_data}
+                                if new_insight: mem_manager.add_topic_memory(topic, current_date_str, new_insight)
+                                
+                        t_data_res = {"topic": topic, "events": timeline_events} if timeline_events else None
+                        return index, deep_data_res, t_data_res
+                    except Exception as e:
+                        print(f"⚠️ Company pipeline failed for {topic}: {e}")
+                        return index, None, None
 
                 results = []
                 with st.spinner(f"🌪️ 正在并行收集与深度推演中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                         futures = [executor.submit(process_company_task, t, i) for i, t in enumerate(topics)]
                         for future in concurrent.futures.as_completed(futures):
-                            results.append(future.result())
+                            try:
+                                item = future.result()
+                                if item:
+                                    results.append(item)
+                            except Exception as e:
+                                print(f"⚠️ Company worker crashed: {e}")
 
                 results.sort(key=lambda x: x[0])
                 all_deep_data = [r[1] for r in results if r[1] is not None]
@@ -203,48 +246,63 @@ if not st.session_state.report_ready:
                 st.info("⚡ 正在启动全域多路扫描并发引擎，请耐心等待...")
 
                 def process_industry_task(t, index):
-                    all_raw_results = []
-                    seen_urls = set()
-                    for query in t['queries']:
-                        res = search_web(query, search_domain, time_limit_dict[time_opt], max_results=10, tavily_key=tavily_key)
-                        if res:
-                            for r in res:
-                                if r['url'] not in seen_urls:
-                                    seen_urls.add(r['url'])
-                                    all_raw_results.append(r)
-                    
-                    if not all_raw_results: return index, None, None
-                    
-                    top_results = all_raw_results[:20]
-                    timeline_events = generate_timeline(ai, top_results, t['title'], current_date_str, time_opt)
-                    
-                    urls_to_scrape = [r['url'] for r in top_results][:12] 
-                    full_text_data, _ = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
-                    
-                    strict_topic_prompt = f"{t['title']}。核心提取要求：{t['desc']}"
-                    final_news_list, _ = map_reduce_analysis(ai, strict_topic_prompt, full_text_data, current_date_str, time_opt, "")
-                    
-                    deep_data_res = None
-                    if final_news_list:
-                        deduped_news = []
-                        seen_titles = []
-                        for n in final_news_list:
-                            if not any(difflib.SequenceMatcher(None, n.title, s).ratio() > 0.6 for s in seen_titles):
-                                deduped_news.append(n)
-                                seen_titles.append(n.title)
+                    try:
+                        all_raw_results = []
+                        seen_urls = set()
+                        for query in t['queries']:
+                            res = search_web(query, search_domain, time_limit_dict[time_opt], max_results=10, tavily_key=tavily_key)
+                            if res:
+                                for r in res:
+                                    url = r.get('url')
+                                    if url and url not in seen_urls:
+                                        seen_urls.add(url)
+                                        all_raw_results.append(r)
                         
-                        if deduped_news:
-                            deep_data_res = {"topic": t['title'], "data": deduped_news} 
+                        if not all_raw_results: return index, None, None
+                        
+                        top_results = all_raw_results[:20]
+                        timeline_events = generate_timeline(ai, top_results, t['title'], current_date_str, time_opt)
+                        
+                        urls_to_scrape = [r.get('url') for r in top_results if r.get('url')][:12] 
+                        full_text_data, _ = safe_run_async_crawler(urls=urls_to_scrape, jina_key=jina_key)
+                        
+                        # 🌟 核心救命稻草：兜底机制，无论如何给大模型塞数据！
+                        if len(full_text_data) < 500:
+                            snippets = [f"标题:{r.get('title')} | 内容:{r.get('content')} | 链接:{r.get('url')}" for r in top_results]
+                            full_text_data = "\n\n".join(snippets)
+                        
+                        strict_topic_prompt = f"{t['title']}。核心提取要求：{t['desc']}"
+                        final_news_list, _ = map_reduce_analysis(ai, strict_topic_prompt, full_text_data, current_date_str, time_opt, "")
+                        
+                        deep_data_res = None
+                        if final_news_list:
+                            deduped_news = []
+                            seen_titles = []
+                            for n in final_news_list:
+                                if not any(difflib.SequenceMatcher(None, n.title, s).ratio() > 0.6 for s in seen_titles):
+                                    deduped_news.append(n)
+                                    seen_titles.append(n.title)
                             
-                    t_data_res = {"topic": t['title'], "events": timeline_events} if timeline_events else None
-                    return index, deep_data_res, t_data_res
+                            if deduped_news:
+                                deep_data_res = {"topic": t['title'], "data": deduped_news} 
+                                
+                        t_data_res = {"topic": t['title'], "events": timeline_events} if timeline_events else None
+                        return index, deep_data_res, t_data_res
+                    except Exception as e:
+                        print(f"⚠️ Industry pipeline failed for {t.get('title', 'unknown')}: {e}")
+                        return index, None, None
 
                 results = []
                 with st.spinner("🌪️ 多路探针已发射！全域数据强力聚合中..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                         futures = [executor.submit(process_industry_task, t, i) for i, t in enumerate(INDUSTRY_TOPICS)]
                         for future in concurrent.futures.as_completed(futures):
-                            results.append(future.result())
+                            try:
+                                item = future.result()
+                                if item:
+                                    results.append(item)
+                            except Exception as e:
+                                print(f"⚠️ Industry worker crashed: {e}")
 
                 results.sort(key=lambda x: x[0]) 
                 all_deep_data = [r[1] for r in results if r[1] is not None]
@@ -265,7 +323,7 @@ else:
             st.download_button("📝 立即下载深度研报 (Word)", f, file_name=st.session_state.word_path, type="secondary", use_container_width=True)
     with col2:
         with open(st.session_state.ppt_path, "rb") as f:
-            st.download_button("📊 立即下载研究简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
+            st.download_button("📊 立即下载高管简报 (PPT)", f, file_name=st.session_state.ppt_path, type="primary", use_container_width=True)
     st.divider()
     if st.button("🔄 开启新一轮情报探索", use_container_width=True):
         st.session_state.report_ready = False

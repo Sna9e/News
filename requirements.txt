@@ -8,3 +8,4 @@ yfinance
 mplfinance
 pandas
 matplotlib
+requests
