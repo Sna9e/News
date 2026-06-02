@@ -66,6 +66,7 @@ from tools.search_engine import (
     search_consumer_daily,
     search_web,
     text_mentions_local_day,
+    verify_selected_news_by_title_search,
 )
 
 _LOCAL_DOTENV_CACHE = None
@@ -733,162 +734,6 @@ def keep_news_items_for_local_day(news_items, source_results, target_date):
                 news.date_check = target_iso
             kept.append(news)
     return kept
-
-
-def _max_age_hours_for_time_flag(time_flag):
-    value = str(time_flag or "").lower()
-    if value == "d":
-        return 30
-    if value == "w":
-        return 24 * 7 + 6
-    if value == "m":
-        return 24 * 31 + 12
-    return 30
-
-
-def _score_title_confirmation(news_title, result):
-    title = str(news_title or "")
-    result_title = str((result or {}).get("title", "") or "")
-    result_body = str((result or {}).get("content", "") or (result or {}).get("snippet", "") or "")
-    title_norm = _normalize_match_text(title)
-    result_title_norm = _normalize_match_text(result_title)
-    if not title_norm or not result_title_norm:
-        return 0.0
-
-    ratio = difflib.SequenceMatcher(None, title_norm, result_title_norm).ratio()
-    title_tokens = _tokenize_match_text(title)
-    result_tokens = _tokenize_match_text(f"{result_title} {result_body[:260]}")
-    overlap = len(title_tokens & result_tokens) / max(len(title_tokens), 1)
-    substring_bonus = 0.18 if title_norm in result_title_norm or result_title_norm in title_norm else 0.0
-    return round(ratio * 0.58 + overlap * 0.34 + substring_bonus, 4)
-
-
-def verify_company_news_items_by_title_search(
-    news_items,
-    topic,
-    sites_text,
-    time_flag,
-    current_dt,
-    tavily_key,
-    search_provider,
-    exa_key="",
-    exa_settings=None,
-    max_results_per_news=8,
-):
-    reviewed = []
-    warnings = []
-    stats = {
-        "enabled": True,
-        "input_count": len(news_items or []),
-        "verified_count": 0,
-        "unverified_count": 0,
-        "suspicious_count": 0,
-        "dropped_count": 0,
-        "search_count": 0,
-        "time_window": str(time_flag or ""),
-        "mode": "soft_keep",
-    }
-    max_age_hours = _max_age_hours_for_time_flag(time_flag)
-
-    for news in news_items or []:
-        title = str(get_value(news, "title", "") or "").strip()
-        if not title:
-            stats["unverified_count"] += 1
-            reviewed.append(news)
-            continue
-
-        query = title
-        try:
-            results = search_web(
-                query,
-                sites_text,
-                time_flag,
-                max_results=max_results_per_news,
-                tavily_key=tavily_key,
-                provider=search_provider,
-                exa_key=exa_key,
-                exa_settings=exa_settings,
-            )
-            stats["search_count"] += 1
-        except Exception as exc:
-            stats["unverified_count"] += 1
-            if isinstance(news, dict):
-                news["title_review_status"] = "search_failed"
-                news["title_review_error"] = exc.__class__.__name__
-            else:
-                setattr(news, "title_review_status", "search_failed")
-                setattr(news, "title_review_error", exc.__class__.__name__)
-            reviewed.append(news)
-            continue
-
-        fresh_results, audit_stats, _ = audit_recent_news_results(
-            results,
-            now=current_dt,
-            max_age_hours=max_age_hours,
-            future_tolerance_hours=6,
-            enabled=True,
-        )
-        scored = [
-            (_score_title_confirmation(title, result), result)
-            for result in fresh_results
-        ]
-        scored = [item for item in scored if item[0] >= 0.16]
-        scored.sort(
-            key=lambda item: (
-                item[0],
-                item[1].get("published_at_resolved") or item[1].get("published_date") or "",
-            ),
-            reverse=True,
-        )
-        if not scored:
-            stats["unverified_count"] += 1
-            if results and not fresh_results:
-                stats["suspicious_count"] += 1
-            if isinstance(news, dict):
-                news["title_review_status"] = "unverified"
-                news["title_review_search_count"] = len(results or [])
-                news["title_review_fresh_count"] = audit_stats.get("kept_count", 0)
-            else:
-                setattr(news, "title_review_status", "unverified")
-                setattr(news, "title_review_search_count", len(results or []))
-                setattr(news, "title_review_fresh_count", audit_stats.get("kept_count", 0))
-            reviewed.append(news)
-            continue
-
-        best = scored[0][1]
-        verified_date = (
-            best.get("published_at_resolved")
-            or best.get("published_date")
-            or best.get("published")
-            or get_value(news, "date_check", "")
-        )
-        if isinstance(news, dict):
-            news["date_check"] = str(verified_date)[:10] if verified_date else news.get("date_check", "")
-            news["title_review_status"] = "verified"
-            news["title_review_source"] = best.get("source") or best.get("url", "")
-            news["title_review_score"] = scored[0][0]
-            if not news.get("url") and best.get("url"):
-                news["url"] = best.get("url")
-        else:
-            news.date_check = str(verified_date)[:10] if verified_date else getattr(news, "date_check", "")
-            setattr(news, "title_review_status", "verified")
-            setattr(news, "title_review_source", best.get("source") or best.get("url", ""))
-            setattr(news, "title_review_score", scored[0][0])
-            if not getattr(news, "url", "") and best.get("url"):
-                news.url = best.get("url")
-        reviewed.append(news)
-
-    stats["verified_count"] = sum(
-        1 for item in reviewed
-        if get_value(item, "title_review_status", "") == "verified"
-    )
-    stats["kept_count"] = len(reviewed)
-    if stats["suspicious_count"]:
-        warnings.insert(
-            0,
-            f"详细新闻标题软复核：{stats['suspicious_count']} 条未找到当前窗口内相近网页，已保留正文但标记为待人工复查。",
-        )
-    return reviewed, stats, warnings
 
 
 
@@ -1784,20 +1629,18 @@ if not st.session_state.report_ready:
                     deep_data_res = None
                     if final_news_list:
                         deduped_news = dedupe_news_items(final_news_list)
-                        title_review_stats = {}
-                        title_review_warnings = []
                         if deduped_news:
-                            deduped_news, title_review_stats, title_review_warnings = verify_company_news_items_by_title_search(
+                            deduped_news, title_review_warnings = verify_selected_news_by_title_search(
                                 deduped_news,
                                 topic,
-                                sites,
                                 time_limit_dict[time_opt],
-                                current_dt,
-                                tavily_key,
-                                active_search_provider,
+                                tavily_key=tavily_key,
+                                provider=active_search_provider,
                                 exa_key=exa_key,
                                 exa_settings=exa_search_settings,
+                                now=current_dt,
                             )
+                            crawl_result["warnings"] = list(crawl_result.get("warnings", [])) + list(title_review_warnings)
                         if deduped_news:
                             finance_data = {}
                             if enable_finance_chain:
@@ -1819,14 +1662,14 @@ if not st.session_state.report_ready:
                                 "finance": finance_data,
                                 "source_mode": crawl_result["source_mode"],
                                 "crawler_valid_count": crawl_result["valid_count"],
-                                "warnings": list(crawl_result.get("warnings", [])) + list(title_review_warnings),
+                                "warnings": list(crawl_result.get("warnings", [])),
                                 "extraction_stats": crawl_result.get("stats", {}),
                                 "freshness_stats": freshness_stats,
-                                "title_review_stats": title_review_stats,
                                 "focus_tags": focus_tags,
                             }
                             if new_insight:
                                 mem_manager.add_topic_memory(topic, current_date_str, new_insight)
+
                     timeline_data_res = {
                         "topic": topic,
                         "events": timeline_events,
