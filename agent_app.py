@@ -775,25 +775,29 @@ def verify_company_news_items_by_title_search(
     exa_settings=None,
     max_results_per_news=8,
 ):
-    verified = []
+    reviewed = []
     warnings = []
     stats = {
         "enabled": True,
         "input_count": len(news_items or []),
         "verified_count": 0,
+        "unverified_count": 0,
+        "suspicious_count": 0,
         "dropped_count": 0,
         "search_count": 0,
         "time_window": str(time_flag or ""),
+        "mode": "soft_keep",
     }
     max_age_hours = _max_age_hours_for_time_flag(time_flag)
 
     for news in news_items or []:
         title = str(get_value(news, "title", "") or "").strip()
         if not title:
-            stats["dropped_count"] += 1
+            stats["unverified_count"] += 1
+            reviewed.append(news)
             continue
 
-        query = f"{title} {topic}".strip()
+        query = title
         try:
             results = search_web(
                 query,
@@ -807,8 +811,14 @@ def verify_company_news_items_by_title_search(
             )
             stats["search_count"] += 1
         except Exception as exc:
-            warnings.append(f"标题复核搜索失败：{title}（{exc.__class__.__name__}）")
-            stats["dropped_count"] += 1
+            stats["unverified_count"] += 1
+            if isinstance(news, dict):
+                news["title_review_status"] = "search_failed"
+                news["title_review_error"] = exc.__class__.__name__
+            else:
+                setattr(news, "title_review_status", "search_failed")
+                setattr(news, "title_review_error", exc.__class__.__name__)
+            reviewed.append(news)
             continue
 
         fresh_results, audit_stats, _ = audit_recent_news_results(
@@ -822,7 +832,7 @@ def verify_company_news_items_by_title_search(
             (_score_title_confirmation(title, result), result)
             for result in fresh_results
         ]
-        scored = [item for item in scored if item[0] >= 0.34]
+        scored = [item for item in scored if item[0] >= 0.16]
         scored.sort(
             key=lambda item: (
                 item[0],
@@ -831,10 +841,18 @@ def verify_company_news_items_by_title_search(
             reverse=True,
         )
         if not scored:
-            stats["dropped_count"] += 1
-            warnings.append(
-                f"标题复核未通过：{title}（搜索 {len(results or [])} 条，时效保留 {audit_stats.get('kept_count', 0)} 条）。"
-            )
+            stats["unverified_count"] += 1
+            if results and not fresh_results:
+                stats["suspicious_count"] += 1
+            if isinstance(news, dict):
+                news["title_review_status"] = "unverified"
+                news["title_review_search_count"] = len(results or [])
+                news["title_review_fresh_count"] = audit_stats.get("kept_count", 0)
+            else:
+                setattr(news, "title_review_status", "unverified")
+                setattr(news, "title_review_search_count", len(results or []))
+                setattr(news, "title_review_fresh_count", audit_stats.get("kept_count", 0))
+            reviewed.append(news)
             continue
 
         best = scored[0][1]
@@ -848,23 +866,29 @@ def verify_company_news_items_by_title_search(
             news["date_check"] = str(verified_date)[:10] if verified_date else news.get("date_check", "")
             news["title_review_status"] = "verified"
             news["title_review_source"] = best.get("source") or best.get("url", "")
+            news["title_review_score"] = scored[0][0]
             if not news.get("url") and best.get("url"):
                 news["url"] = best.get("url")
         else:
             news.date_check = str(verified_date)[:10] if verified_date else getattr(news, "date_check", "")
             setattr(news, "title_review_status", "verified")
             setattr(news, "title_review_source", best.get("source") or best.get("url", ""))
+            setattr(news, "title_review_score", scored[0][0])
             if not getattr(news, "url", "") and best.get("url"):
                 news.url = best.get("url")
-        verified.append(news)
+        reviewed.append(news)
 
-    stats["verified_count"] = len(verified)
-    if stats["dropped_count"]:
+    stats["verified_count"] = sum(
+        1 for item in reviewed
+        if get_value(item, "title_review_status", "") == "verified"
+    )
+    stats["kept_count"] = len(reviewed)
+    if stats["suspicious_count"]:
         warnings.insert(
             0,
-            f"详细新闻标题复核：保留 {stats['verified_count']}/{stats['input_count']} 条，剔除 {stats['dropped_count']} 条未通过时效或标题匹配的新闻。",
+            f"详细新闻标题软复核：{stats['suspicious_count']} 条未找到当前窗口内相近网页，已保留正文但标记为待人工复查。",
         )
-    return verified, stats, warnings
+    return reviewed, stats, warnings
 
 
 
@@ -1803,16 +1827,6 @@ if not st.session_state.report_ready:
                             }
                             if new_insight:
                                 mem_manager.add_topic_memory(topic, current_date_str, new_insight)
-                        elif title_review_warnings:
-                            deep_empty, _ = build_empty_section_payload(
-                                topic,
-                                warnings=title_review_warnings,
-                                freshness_stats=freshness_stats,
-                                focus_tags=focus_tags,
-                            )
-                            deep_empty["title_review_stats"] = title_review_stats
-                            deep_data_res = deep_empty
-
                     timeline_data_res = {
                         "topic": topic,
                         "events": timeline_events,
