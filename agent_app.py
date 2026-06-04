@@ -1659,6 +1659,7 @@ if not st.session_state.report_ready:
                             deep_data_res = {
                                 "topic": topic,
                                 "data": deduped_news,
+                                "report_style": "company_tracking",
                                 "finance": finance_data,
                                 "source_mode": crawl_result["source_mode"],
                                 "crawler_valid_count": crawl_result["valid_count"],
@@ -1673,6 +1674,7 @@ if not st.session_state.report_ready:
                     timeline_data_res = {
                         "topic": topic,
                         "events": timeline_events,
+                        "report_style": "company_tracking",
                         "warnings": list(crawl_result.get("warnings", [])),
                         "extraction_stats": crawl_result.get("stats", {}),
                         "freshness_stats": freshness_stats,
