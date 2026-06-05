@@ -1,5 +1,41 @@
 # HANDOFF.md
 
+## 0B. 2026-06-05 更新：频道一核心时间线摘要扩展为 4-5 句短新闻
+
+本次只优化频道一核心时间线 `event_summary` 的内容长度和完整度；不调用 Tavily，不使用真实 API Key，不修改频道二、频道三、详细新闻、金融补链、PPT 模板、`tools/report_linker.py`、搜索引擎配置或时间线分页规则。
+
+根因：
+- 上次修复后的 `event_summary` 目标仍是 50-100 字，`_trim_event_summary()` 默认只保留前两句。
+- `_build_event_summary_from_result()` 的 fallback 也沿用短摘要截取逻辑，材料足够时仍会输出一两句话。
+- PPT 展示层保留了旧的 100/118 字截断上限，导致即使上游生成更长摘要，也无法完整显示在频道一时间线页。
+
+已完成：
+- `agents/timeline_agent.py`
+  - 将 `event_summary` 目标调整为 140-220 个中文字符，通常 4-5 个完整句子。
+  - 更新 `EventDraft` / `TimelineEvent` 字段说明和 `build_event_blueprints()` prompt，要求摘要覆盖主体、动作、对象、关键细节和直接影响，只能基于输入搜索摘要生成，不得编造或使用空泛补句。
+  - `_trim_event_summary()` 改为优先抽取 3-5 个清洗后的有效句子，不再简单截取前 50-100 字。
+  - `_build_event_summary_from_result()` 在中文材料不足但存在英文材料时，生成中文结构化兜底描述，不直接复制短英文摘要；无可靠材料时仍使用“公开材料暂未披露更多细节，建议后续继续跟踪。”
+  - `_event_summary_quality()` 按 140-220 字和 4-5 句优先级重新评分，重复事件合并时更倾向保留完整短新闻。
+- `tools/export_ppt.py`
+  - 仅放宽频道一 `event_summary` 的展示截断上限，保留原有摘要位置、字体 Pt(10)、深灰色、每页最多 3 条和 `↳ 详见后文：《标题》` 格式。
+- `tests/test_channel1_timeline_summary.py`
+  - Apple stub 摘要更新为 140-220 字、4-5 句。
+  - 自动检查正常摘要为中文、4-5 句、140-220 字，不出现空泛补丁句或短英文残句。
+  - 继续检查 4 条时间线拆为 2 页、每页最多 3 条、空摘要 fallback、长 `match_reason` 不展示，并增加基于文本行数的无明显溢出检查。
+
+已执行验证：
+- `python tests\test_channel1_timeline_summary.py`
+- `python -m py_compile agent_app.py agents\timeline_agent.py tools\export_ppt.py tools\export_word.py tools\report_linker.py`
+- `python tests\test_channel1_news_cleanup_and_title_gate.py`
+
+验证输出：
+- 本地 stub PPT：`E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main\stub_validation_channel1_timeline_apple.pptx`
+- 自动检查显示 Apple 时间线页为 2 页，第一页 3 条、第二页 1 条；正常摘要满足 140-220 字和 4-5 句要求。
+- 本机未检测到 LibreOffice / soffice，未完成图片渲染检查；已完成 python-pptx 自动结构检查和文本行数溢出检查。
+
+未完成：
+- 本次按要求未执行真实 Exa / Tavily / DeepSeek API 验证。
+
 ## 0A. 2026-06-05 更新：修复频道一核心时间线 PPT 实际摘要缺失/英文摘要问题
 
 本次只修复频道一核心时间线，不调用 Tavily，不使用真实 API Key，不修改频道二、频道三、详细新闻、金融补链、PPT 模板、`tools/report_linker.py` 匹配逻辑和搜索引擎配置。
