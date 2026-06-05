@@ -1,5 +1,46 @@
 # HANDOFF.md
 
+## 0A. 2026-06-05 更新：修复频道一核心时间线 PPT 实际摘要缺失/英文摘要问题
+
+本次只修复频道一核心时间线，不调用 Tavily，不使用真实 API Key，不修改频道二、频道三、详细新闻、金融补链、PPT 模板、`tools/report_linker.py` 匹配逻辑和搜索引擎配置。
+
+根因：
+- `build_event_blueprints()` 的原有 prompt 没有强制模型一次性生成 `event_summary`。
+- `_rewrite_event_dicts()` 在绑定最佳搜索结果并更新标题、日期、来源、URL 时，会用搜索结果 fallback 覆盖已有摘要；当搜索结果是英文时，最终 PPT 可能显示很短英文原始片段。
+- PPT 展示层虽然有摘要段落，但缺少对“短英文摘要/非中文摘要”的最后防线。
+
+已完成：
+- `agents/timeline_agent.py`
+  - 在 `EventDraft` / `EventBlueprint` / `TimelineEvent` 中保留 `event_summary` 字段，描述统一为“50到100字中文短新闻摘要，说明主体、动作、对象和关键影响，不得编造。”
+  - 在 `build_event_blueprints()` 的同一次 LLM prompt 中强制每条事件填写中文 `event_summary`，要求 50-100 字、基于输入摘要、不得复制英文、不得出现空泛补丁句。
+  - `_rewrite_event_dicts()` 更新标题/日期/来源/URL 时不再覆盖已有合格中文摘要，只在缺失或 fallback 更好时替换。
+  - `_merge_event_dict()` 合并重复事件时按中文程度和长度质量选择更好的摘要，不拼接两段摘要。
+  - `_fallback_event_blueprints()` / `_finalize_event_blueprints()` / `generate_timeline()` 均保证 `event_summary` 不丢失；无可靠材料时使用“公开材料暂未披露更多细节，建议后续继续跟踪。”
+- `tools/export_ppt.py`
+  - 频道一核心时间线每条标题下方实际渲染摘要段落，字体 Pt(10)，深灰色。
+  - 频道一时间线 `chunk_size` 为 3，每页最多 3 条。
+  - 频道一关联详细新闻仅显示 `↳ 详见后文：《详细新闻标题》`，不再展示长 `match_reason`。
+  - 展示层增加防御：非中文或很短英文片段不显示，改为诚实 fallback。
+- `tests/test_channel1_timeline_summary.py`
+  - 生成本地 Apple stub PPT：`stub_validation_channel1_timeline_apple.pptx`。
+  - 自动检查 Apple 核心时间线页存在、4 条事件拆分为 2 页、每页最多 3 条、标题下方有摘要、正常摘要为 50-100 字中文、摘要字体 Pt(10)/Pt(11)、不出现短英文片段、补丁句、长 `match_reason`，空摘要显示诚实 fallback。
+  - 增加 FakeAI stub，验证 `build_event_blueprints()` → `generate_timeline()` → `generate_ppt()` 字段完整透传，不调用 Tavily、不读取真实 API Key。
+
+已执行验证：
+- `python -m py_compile agent_app.py agents\timeline_agent.py tools\export_ppt.py tools\export_word.py tools\report_linker.py`
+- `python tests\test_channel1_timeline_summary.py`
+- `python tests\test_channel1_news_cleanup_and_title_gate.py`
+- `python tests\test_consumer_daily_validation.py`
+- `python tests\test_consumer_daily_exa_breadth.py`
+- `python tests\test_consumer_daily_channel1_pipeline.py`
+
+验证输出：
+- 本地 stub PPT：`E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main\stub_validation_channel1_timeline_apple.pptx`
+- 本机未检测到 LibreOffice / soffice，未完成图片渲染检查；已完成 python-pptx 自动检查。
+
+未完成：
+- 本次按要求未执行真实 Exa / Tavily / DeepSeek API 验证。
+
 ## 0. 2026-06-04 更新：频道一核心时间线短摘要
 
 本次只增强频道一核心时间线展示，目标是让每条时间线除短标题外，再带一段复用原始搜索结果生成的 50-100 字短新闻摘要；不新增搜索调用，不新增 LLM 调用，不修改频道二、频道三、详细新闻生成逻辑、PPT 模板/封面/金融页或 `tools/report_linker.py`。
