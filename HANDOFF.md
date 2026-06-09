@@ -1,5 +1,61 @@
 # HANDOFF.md
 
+## 0C. 2026-06-09 更新：修复时间线免责声明摘要、来源质量门禁和详细新闻有效性
+
+本次检查了新闻检索、来源排序、时间线摘要、详细新闻生成、标题二次审查和 Streamlit HTML 预览输出链路。页面整体结构保持不变，仅在核心时间线卡片中补充展示已有 `event_summary`。
+
+根因：
+- `agents/timeline_agent.py` 的英文材料兜底会生成“公开材料显示……该线索由某网站披露……材料没有提供足够细节……”这类免责声明模板。
+- 详细新闻 `_supplement_news_from_blueprints()` 会为了达到数量下限，从事件主档和搜索摘要生成 fallback 长新闻，存在低信息量补齐风险。
+- 公司搜索排序缺少统一来源质量判断，聚合站、低正文量页面和低阅读量页面没有在排序前被剔除。
+- 标题二次审查只看标题相似度，中文成稿标题与英文原文标题不一致时，可能误删同 URL 的有效新闻。
+
+已完成：
+- `tools/search_engine.py`
+  - 新增来源质量评估：优先官方/监管/主流媒体/成熟垂直媒体；排除低质量域名、明显聚合/SEO/转载噪声、无标题/无日期/正文不足、公开阅读量低于 100 的非原始信源。
+  - 新增事件有效性校验：主体、动作、产品/功能/政策/业务变化三项至少满足两项。
+  - 标题二次审查增加同 URL 通过逻辑：二次搜索命中原文 URL 且时间在窗口内时，不因中英文标题差异误删。
+- `tools/company_query_packs.py`
+  - 公司检索结果排序前接入来源质量门禁，并对官方/优先媒体加权。
+- `agents/timeline_agent.py`
+  - 删除免责声明式中文结构化兜底；材料不足时返回空摘要，并在最终时间线中剔除该事件。
+  - 禁止 `event_summary` 出现“公开材料显示”“该线索由某网站披露”“材料没有提供足够细节”“暂不能确认更多参数”“时间线仅记录已披露动作”等模板句。
+  - 摘要规则调整为 3-5 句、100-220 字自然中文新闻导语。
+- `agents/deep_analyst.py`
+  - 最终详细新闻输出前增加字段完整性、来源质量、事件三要素和免责声明摘要过滤。
+  - 补充详细新闻时只使用高质量且内容足够的搜索结果；材料不足时不再用事件标题硬造长新闻。
+  - Prompt 明确要求每条详细新闻包含标题、日期、来源、原文链接，并在【事件核心】开头提供 3-5 句自然中文导语。
+- `agent_app.py`
+  - Streamlit HTML 时间线卡片展示 `event_summary`；摘要为空时不显示占位。
+  - 频道一详细新闻少于 2 条时在 warnings 中提示：“在设定时间范围内，未检索到足够多可核实且具有信息增量的高质量新闻。”
+- `tools/export_ppt.py`
+  - 移除频道一时间线空摘要占位，只有存在有效摘要时才展示摘要和原文链接。
+- 测试更新：
+  - 增加免责声明摘要被拒绝、短英文材料不生成摘要、低质量来源被剔除、同 URL 标题审查通过、最终详细新闻剔除免责声明条目的 stub 测试。
+
+已执行验证：
+- `python -m py_compile agent_app.py agents\timeline_agent.py agents\deep_analyst.py tools\search_engine.py tools\company_query_packs.py tools\export_ppt.py tools\export_word.py tools\report_linker.py`
+- `python tests\test_channel1_timeline_summary.py`
+- `python tests\test_channel1_news_cleanup_and_title_gate.py`
+- `python tests\test_consumer_daily_validation.py`
+- `python tests\test_consumer_daily_exa_breadth.py`
+- `python tests\test_consumer_daily_channel1_pipeline.py`
+
+真实 API 验证：
+- 使用本地 `Exa + DeepSeek + Jina` 跑 Apple / Google / Tesla 精简频道一链路，未使用 Tavily。
+- 输出文件：
+  - `E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main\validation_company_quality_real.json`
+  - `E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main\validation_company_quality_real.html`
+- 结果：
+  - Apple：时间线 8 条，详细新闻 3 条。
+  - Google：时间线 8 条，详细新闻 2 条。
+  - Tesla：时间线 8 条，详细新闻 4 条。
+  - 自动抽查显示所有详细新闻均有 URL，摘要均未出现禁用免责声明模板。
+
+风险点：
+- 来源质量门禁比旧逻辑更严格，低质量来源不会再用于凑数量；极端情况下某主题详细新闻会少于 2 条，但会显示明确 warning。
+- 标题二次审查仍保留时效窗口，旧闻和未来异常新闻不会因 URL 命中绕过时间过滤。
+
 ## 0B. 2026-06-05 更新：频道一核心时间线摘要扩展为 4-5 句短新闻
 
 本次只优化频道一核心时间线 `event_summary` 的内容长度和完整度；不调用 Tavily，不使用真实 API Key，不修改频道二、频道三、详细新闻、金融补链、PPT 模板、`tools/report_linker.py`、搜索引擎配置或时间线分页规则。
