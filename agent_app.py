@@ -11,12 +11,14 @@ import tomllib
 import traceback
 from pathlib import Path
 
-from agents.deep_analyst import map_reduce_analysis
+from agents.deep_analyst import map_reduce_analysis, enforce_company_evidence
 from agents.timeline_agent import build_event_blueprints, generate_timeline
 from tools.export_ppt import generate_ppt
 from tools.export_word import generate_word
 from tools.finance_engine import fetch_financial_data
+from tools.company_strategy import build_strategy_overview, apply_strategy_to_sections, CONFIG as strategy_config
 from tools.company_query_packs import (
+    DEFAULT_COMPANY_TOPICS,
     build_company_focus_hint,
     build_company_queries_from_pack,
     get_company_query_pack,
@@ -26,7 +28,7 @@ from tools.consumer_topic_query_packs import (
     build_consumer_topic_focus_hint,
     collect_consumer_topic_search_results,
     filter_consumer_results_by_freshness,
-    get_all_consumer_topic_query_packs,
+    get_channel3_major_news_topic_query_packs,
 )
 from tools.consumer_daily_validation import (
     CONSUMER_DAILY_MAX_EVENTS_PER_TOPIC,
@@ -36,13 +38,14 @@ from tools.consumer_daily_validation import (
     build_verified_news_package,
     build_verified_topic_events,
     build_topic_output,
+    build_verified_digest_news_items,
     dataclass_to_dict,
     enrich_news_items_with_verified_events,
     event_blueprints_from_verified_topic,
     normalize_time_window,
     raw_results_from_verified_topic,
     validate_consumer_daily_quality,
-    verified_package_to_deepseek_material,
+    verified_package_to_llm_material,
 )
 from tools.intelligence_packs import (
     build_focus_hint,
@@ -52,6 +55,18 @@ from tools.intelligence_packs import (
     get_default_sites_text,
     get_industry_topics,
     rank_results_by_pack,
+)
+from tools.llm_driver import (
+    AI_Driver,
+    DEFAULT_OPENROUTER_BASE_URL,
+    DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_OPENROUTER_REASONING_EFFORT,
+    OPENROUTER_REASONING_EFFORTS,
+    build_openrouter_model_options,
+    build_ai_stack,
+    fetch_openrouter_model_catalog,
+    find_openrouter_model_info,
+    format_model_stack_name,
 )
 from tools.memory_manager import GistMemoryManager
 from tools.report_linker import annotate_report_data
@@ -68,6 +83,30 @@ from tools.search_engine import (
     text_mentions_local_day,
     verify_selected_news_by_title_search,
 )
+from tools.source_blocklist import (
+    get_builtin_block_rules,
+    load_user_source_blocklist,
+    parse_manual_blocklist,
+    save_user_source_blocklist,
+)
+from pwg_intelligence.collector import (
+    DEFAULT_RAW_DIR as PWG_DEFAULT_RAW_DIR,
+    collect_pwg_daily_scan,
+)
+from pwg_intelligence.excel_store import DEFAULT_WORKBOOK_PATH as PWG_DEFAULT_WORKBOOK_PATH
+from pwg_intelligence.reporter import (
+    DEFAULT_REPORT_DIR as PWG_DEFAULT_REPORT_DIR,
+    find_latest_raw_json,
+    load_classified_rows_from_json,
+    write_daily_brief,
+    write_weekly_review,
+)
+from strain_gauge_intelligence import TECH_MODULES as STRAIN_GAUGE_TECH_MODULES
+from strain_gauge_intelligence.collector import (
+    DEFAULT_RAW_DIR as STRAIN_GAUGE_DEFAULT_RAW_DIR,
+    collect_strain_gauge_module,
+)
+from strain_gauge_intelligence.reporter import DEFAULT_REPORT_DIR as STRAIN_GAUGE_DEFAULT_REPORT_DIR
 
 _LOCAL_DOTENV_CACHE = None
 _LOCAL_SECRET_CACHE = None
@@ -147,11 +186,15 @@ def _load_local_secret_fallback():
     return _LOCAL_SECRET_CACHE
 
 import streamlit as st
-from openai import OpenAI
 from pydantic import BaseModel, Field
 
 
-st.set_page_config(page_title="DeepSeek 部门情报中心", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="OpenRouter 多模型部门情报中心", page_icon="🧠", layout="wide")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_openrouter_model_catalog_cached(base_url, _api_key=""):
+    return fetch_openrouter_model_catalog(base_url=base_url, api_key=_api_key)
 
 SESSION_DEFAULTS = {
     "report_ready": False,
@@ -175,28 +218,13 @@ CONSUMER_DAILY_CRAWL_URL_LIMIT = 16
 CONSUMER_DAILY_SOURCE_RESULT_LIMIT = 36
 CONSUMER_DAILY_MIN_NEWS_PER_TOPIC = CONSUMER_DAILY_MIN_EVENTS_PER_TOPIC
 CONSUMER_DAILY_MAX_NEWS_PER_TOPIC = CONSUMER_DAILY_TARGET_EVENTS_PER_TOPIC
-CONSUMER_DAILY_VERIFICATION_EVENT_LIMIT = 10
-CONSUMER_DAILY_VERIFICATION_QUERY_LIMIT = 6
+CONSUMER_DAILY_VERIFICATION_EVENT_LIMIT = 3
+CONSUMER_DAILY_VERIFICATION_QUERY_LIMIT = 2
 MAX_SOURCE_CHARS_PER_URL = 2400
-DEFAULT_GEMINI_LIGHT_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_GEMINI_MAIN_MODEL = "gemini-2.5-flash-lite"
-GEMINI_3_FLASH_PREVIEW_MODEL = "gemini-3-flash-preview"
-# Inference from Google's public model naming pattern + model catalog entry.
-# If a specific account has not exposed this preview string yet, users can
-# still override it through the custom model field below.
-GEMINI_31_FLASH_LITE_PRESET = "gemini-3.1-flash-lite-preview"
-GEMINI_MODEL_OPTIONS = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-flash-latest",
-    GEMINI_3_FLASH_PREVIEW_MODEL,
-    "__custom__",
-]
 DEFAULT_SEARCH_PROVIDER = "exa"
 DEFAULT_CONSUMER_DAILY_SEARCH_PROVIDER = "exa"
-DEFAULT_CONSUMER_DAILY_TIME_WINDOW = "72h"
-DEFAULT_CONSUMER_DAILY_SEARCH_DEPTH = "wide"
+DEFAULT_CONSUMER_DAILY_TIME_WINDOW = "7d"
+DEFAULT_CONSUMER_DAILY_SEARCH_DEPTH = "normal"
 DEFAULT_EXA_SEARCH_TYPE = "auto"
 DEFAULT_EXA_CATEGORY = "news"
 DEFAULT_EXA_RESULT_LIMIT = 10
@@ -218,12 +246,6 @@ SEARCH_UI_DEFAULTS = {
     "exa_text_chars": DEFAULT_EXA_TEXT_CHARS,
     "exa_include_text": DEFAULT_EXA_INCLUDE_TEXT,
     "exa_exclude_text": DEFAULT_EXA_EXCLUDE_TEXT,
-    "use_gemini_main": False,
-    "gemini_main_model": DEFAULT_GEMINI_MAIN_MODEL,
-    "gemini_main_model_custom": "",
-    "use_gemini_light": False,
-    "gemini_light_model": DEFAULT_GEMINI_LIGHT_MODEL,
-    "gemini_light_model_custom": "",
 }
 
 for session_key, default_value in SESSION_DEFAULTS.items():
@@ -233,146 +255,6 @@ for session_key, default_value in SESSION_DEFAULTS.items():
 for session_key, default_value in SEARCH_UI_DEFAULTS.items():
     if session_key not in st.session_state:
         st.session_state[session_key] = default_value
-
-
-class AI_Driver:
-    def __init__(self, api_key, model_id, provider="deepseek"):
-        self.valid = False
-        self.provider = provider
-        self.model_id = model_id
-        self.base_url = self._resolve_base_url(provider)
-        if api_key and model_id and self.base_url:
-            try:
-                self.client = OpenAI(api_key=api_key, base_url=self.base_url)
-                self.valid = True
-            except Exception:
-                pass
-
-    @staticmethod
-    def _resolve_base_url(provider):
-        provider_key = str(provider or "").strip().lower()
-        if provider_key == "gemini":
-            return "https://generativelanguage.googleapis.com/v1beta/openai/"
-        if provider_key == "deepseek":
-            return "https://api.deepseek.com"
-        return ""
-
-    @property
-    def label(self):
-        if self.provider == "gemini":
-            return f"Gemini AI Studio/{self.model_id}"
-        return f"DeepSeek/{self.model_id}"
-
-    def _request_completion(self, messages, force_plain_json=False):
-        request_kwargs = {
-            "model": self.model_id,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": 4096,
-        }
-        if not force_plain_json:
-            request_kwargs["response_format"] = {"type": "json_object"}
-        return self.client.chat.completions.create(**request_kwargs)
-
-    def analyze_structural(self, prompt, structure_class):
-        if not self.valid:
-            return None
-
-        sys_prompt = (
-            "必须严格按 JSON 格式返回，不要带任何思考过程或多余文字。"
-            f"JSON Schema 如下:\n{json.dumps(structure_class.model_json_schema(), ensure_ascii=False)}"
-        )
-
-        try:
-            messages = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": prompt},
-            ]
-            try:
-                res = self._request_completion(messages)
-            except Exception:
-                if self.provider != "gemini":
-                    raise
-                # Gemini OpenAI compatibility is good enough for this workflow,
-                # but some accounts/features can reject json_object. Retry once
-                # with plain text JSON instructions so the toggle remains non-breaking.
-                res = self._request_completion(messages, force_plain_json=True)
-            content = res.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.strip("`").strip()
-                if content.lower().startswith("json"):
-                    content = content[4:].strip()
-
-            data = json.loads(content)
-            if isinstance(data, list):
-                data = {list(structure_class.model_fields.keys())[0]: data}
-            return structure_class(**data)
-        except Exception as e:
-            print(f"⚠️ AI 结构化解析失败: {e}")
-            return None
-
-
-def build_ai_stack(
-    deepseek_key,
-    deepseek_model,
-    use_gemini_light=False,
-    gemini_key="",
-    gemini_model=DEFAULT_GEMINI_LIGHT_MODEL,
-    use_gemini_main=False,
-    gemini_main_model=DEFAULT_GEMINI_MAIN_MODEL,
-):
-    deepseek_driver = AI_Driver(deepseek_key, deepseek_model, provider="deepseek")
-    heavy_driver = deepseek_driver
-    light_driver = heavy_driver
-    notices = []
-
-    if use_gemini_main:
-        gemini_heavy_driver = AI_Driver(gemini_key, gemini_main_model, provider="gemini")
-        if gemini_heavy_driver.valid:
-            heavy_driver = gemini_heavy_driver
-            light_driver = heavy_driver
-            notices.append(
-                f"主模型已切换到 {heavy_driver.label}；当前沿用同一套 Prompt 和输出结构。"
-            )
-        elif deepseek_driver.valid:
-            notices.append(
-                "已开启 Gemini AI Studio 主模型，但当前未检测到可用的 GEMINI_API_KEY / GOOGLE_API_KEY；本次自动回退为 DeepSeek。"
-            )
-        else:
-            heavy_driver = gemini_heavy_driver
-            light_driver = heavy_driver
-
-    if use_gemini_light:
-        gemini_driver = AI_Driver(gemini_key, gemini_model, provider="gemini")
-        if gemini_driver.valid:
-            if heavy_driver.valid and heavy_driver.provider == "gemini" and heavy_driver.model_id == gemini_model:
-                light_driver = heavy_driver
-                notices.append(
-                    f"轻任务引擎与主模型共用 {light_driver.label}。"
-                )
-            else:
-                light_driver = gemini_driver
-                if heavy_driver.provider == "gemini":
-                    notices.append(
-                        f"主模型使用 {heavy_driver.label}，轻任务使用 {light_driver.label}。"
-                    )
-                else:
-                    notices.append(
-                        f"轻任务引擎已切换到 {light_driver.label}；DeepSeek 继续负责最终成稿和金融分析。"
-                    )
-        else:
-            notices.append(
-                "已开启 Gemini AI Studio 轻任务引擎，但当前未检测到可用的 GEMINI_API_KEY / GOOGLE_API_KEY；本次自动回退为全 DeepSeek。"
-            )
-
-    return heavy_driver, light_driver, notices
-
-
-def format_model_stack_name(heavy_driver, light_driver):
-    if light_driver and light_driver.valid and light_driver.provider != heavy_driver.provider:
-        return f"{heavy_driver.label} + {light_driver.label}"
-    return heavy_driver.label
-
 
 
 def normalize_search_provider(provider):
@@ -428,19 +310,25 @@ def build_consumer_daily_exa_settings(base_settings):
     return settings
 
 
-def format_gemini_model_option(model_name):
-    labels = {
-        "gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite",
-        "gemini-2.5-flash": "Gemini 2.5 Flash",
-        "gemini-2.5-pro": "Gemini 2.5 Pro",
-        "gemini-flash-latest": "Gemini Flash Latest（滚动别名）",
-        GEMINI_3_FLASH_PREVIEW_MODEL: "Gemini 3 Flash Preview",
-        "__custom__": "自定义模型 ID",
-    }
-    return labels.get(model_name, model_name)
+def format_openrouter_model_option(model_name, catalog_by_id=None):
+    if model_name == "__custom__":
+        return "自定义模型 ID"
+    model_info = (catalog_by_id or {}).get(model_name)
+    if model_info:
+        return f"{model_info.name} · {model_info.model_id}"
+    if model_name == DEFAULT_OPENROUTER_MODEL:
+        return f"{model_name}（默认）"
+    return f"{model_name}（目录未验证）"
 
 
-def resolve_gemini_model_name(selected_model, custom_model, fallback_model):
+def format_token_limit(value):
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "未披露"
+
+
+def resolve_model_name(selected_model, custom_model, fallback_model):
     if selected_model == "__custom__":
         custom_value = str(custom_model or "").strip()
         return custom_value or fallback_model
@@ -466,19 +354,6 @@ def apply_exa_hardtech_preset():
     st.session_state.search_provider = "exa"
     st.session_state.exa_include_text = HARDTECH_EXA_INCLUDE_TEXT
     st.session_state.exa_exclude_text = HARDTECH_EXA_EXCLUDE_TEXT
-
-
-def apply_gemini_3_flash_main_preset():
-    st.session_state.use_gemini_main = True
-    st.session_state.gemini_main_model = GEMINI_3_FLASH_PREVIEW_MODEL
-    st.session_state.gemini_main_model_custom = ""
-
-
-def apply_gemini_31_flash_lite_main_preset():
-    st.session_state.use_gemini_main = True
-    st.session_state.gemini_main_model = "__custom__"
-    st.session_state.gemini_main_model_custom = GEMINI_31_FLASH_LITE_PRESET
-
 
 
 def build_run_metadata(requested_provider, resolved_provider, notices, diagnostics):
@@ -533,6 +408,18 @@ def render_search_runtime_panel(run_metadata):
         )
     if provider_parts:
         st.caption("；".join(provider_parts))
+
+    source_blocking = diagnostics.get("source_blocking", {}) or {}
+    blocked_count = int(source_blocking.get("blocked_count", 0) or 0)
+    if blocked_count:
+        by_domain = source_blocking.get("by_domain", {}) or {}
+        top_domains = sorted(by_domain.items(), key=lambda item: int(item[1] or 0), reverse=True)[:5]
+        domain_summary = "、".join(f"{domain}（{count}）" for domain, count in top_domains)
+        st.caption(f"信息源门禁已拦截 {blocked_count} 条结果" + (f"：{domain_summary}" if domain_summary else ""))
+        samples = source_blocking.get("samples", []) or []
+        if samples:
+            with st.expander("查看本次信息源拦截记录", expanded=False):
+                st.dataframe(samples, width="stretch", hide_index=True)
 
     for notice in meta.get("notices", []) or []:
         st.warning(notice)
@@ -610,11 +497,24 @@ def finance_fallback_payload(msg="Finance engine temporarily unavailable"):
         "open_price": "N/A",
         "prev_close": "N/A",
         "pe_pb": "N/A",
+        "trailing_pe": None,
+        "forward_pe": None,
+        "price_to_book": None,
+        "earnings_yield": "N/A",
+        "earnings_yield_pct": None,
         "erp": "N/A",
         "market_cap": "N/A",
         "range_52w": "N/A",
         "volume": "N/A",
         "chart_path": None,
+        "valuation_assessment": "估值数据不足",
+        "valuation_reason": msg,
+        "price_assessment": "价格数据不足",
+        "price_assessment_reasons": [],
+        "research_stance": "数据不足",
+        "research_stance_reason": "缺少足够行情数据，暂不形成观察结论",
+        "risk_flags": ["金融链不可用"],
+        "analysis_disclaimer": "规则化研究观察，不构成个性化投资建议或目标价。",
     }
 
 
@@ -644,7 +544,8 @@ def format_freshness_stats(stats):
         f"时效审查：保留 {int(stats.get('kept_count', 0) or 0)}/{int(stats.get('input_count', 0) or 0)} 条，"
         f"剔除超窗 {int(stats.get('dropped_stale_count', 0) or 0)} 条、"
         f"缺时间戳 {int(stats.get('dropped_missing_timestamp_count', 0) or 0)} 条、"
-        f"时间异常 {int(stats.get('dropped_future_count', 0) or 0)} 条"
+        f"时间异常 {int(stats.get('dropped_future_count', 0) or 0)} 条、"
+        f"时间证据冲突 {int(stats.get('date_conflict_count', 0) or 0)} 条"
     )
 
 
@@ -657,6 +558,8 @@ def audit_results_for_freshness(raw_results, time_flag, current_dt):
         max_age_hours=30,
         future_tolerance_hours=6,
         enabled=enabled,
+        verify_page_dates=enabled,
+        max_page_checks=EVENT_BLUEPRINT_INPUT_LIMIT_COMPANY,
     )
 
 
@@ -897,6 +800,7 @@ def collect_company_search_results(
     search_provider=DEFAULT_SEARCH_PROVIDER,
     exa_key="",
     exa_settings=None,
+    blocked_domains=None,
 ):
     company_pack = company_pack or get_company_query_pack(topic)
     merged_results = []
@@ -919,6 +823,7 @@ def collect_company_search_results(
             provider=search_provider,
             exa_key=exa_key,
             exa_settings=exa_settings,
+            blocked_domains=blocked_domains,
         )
         for item in batch or []:
             url = item.get("url")
@@ -1118,6 +1023,7 @@ def render_timeline_preview(timeline_data):
 
     for section in timeline_data:
         topic = get_value(section, "topic", "未命名专题")
+        is_company_tracking = get_value(section, "report_style", "") == "company_tracking"
         st.markdown(f"### 专题：{topic}")
         focus_tags = get_value(section, "focus_tags", [])
         if focus_tags:
@@ -1144,18 +1050,33 @@ def render_timeline_preview(timeline_data):
             appears_later = bool(get_value(event, "appears_in_later_news", False))
             matched_title = html.escape(str(get_value(event, "matched_news_title", "")))
             match_reason = html.escape(str(get_value(event, "match_reason", "")))
+            matched_index = int(get_value(event, "matched_news_index", 0) or 0)
+            highlight_level = str(get_value(event, "highlight_level", "") or "").strip().lower()
+            if appears_later and highlight_level not in {"key", "linked"}:
+                try:
+                    matched_importance = int(get_value(event, "matched_news_importance", 3) or 3)
+                except (TypeError, ValueError):
+                    matched_importance = 3
+                highlight_level = "key" if matched_importance >= 4 else "linked"
             history_status = str(get_value(event, "history_status", "") or "")
             first_seen = html.escape(str(get_value(event, "first_seen", "")))
             seen_count = int(get_value(event, "seen_count", 0) or 0)
 
-            border_color = "#f59e0b" if appears_later else "#cbd5e1"
-            background = "#fff7ed" if appears_later else "#f8fafc"
+            border_color = "#b45309" if highlight_level == "key" else ("#1f4e79" if highlight_level == "linked" else "#cbd5e1")
+            background = "#fff7ed" if highlight_level == "key" else ("#eff6ff" if highlight_level == "linked" else "#f8fafc")
             badge_html = ""
             if appears_later:
+                if is_company_tracking:
+                    detail_label = f"详细新闻 {matched_index}" if matched_index else "详细新闻"
+                    badge_text = f"重点新闻 · {detail_label}" if highlight_level == "key" else f"详见{detail_label}"
+                    badge_color = "#b45309" if highlight_level == "key" else "#1f4e79"
+                else:
+                    badge_text = "后续长新闻已展开"
+                    badge_color = "#f59e0b"
                 badge_html += (
                     "<span style='display:inline-block;margin-left:8px;padding:2px 8px;"
-                    "border-radius:999px;background:#f59e0b;color:#fff;font-size:12px;'>"
-                    "后续长新闻已展开</span>"
+                    f"border-radius:999px;background:{badge_color};color:#fff;font-size:12px;'>"
+                    f"{badge_text}</span>"
                 )
             if history_status == "followup":
                 badge_html += (
@@ -1182,10 +1103,18 @@ def render_timeline_preview(timeline_data):
                 matched_news_line = "已在后续长新闻中展开"
                 if should_show_matched_title(event_text, matched_title):
                     matched_news_line = matched_title
-                detail_html = (
-                    f"<div style='margin-top:8px;color:#7c2d12;'><strong>对应长新闻：</strong>{matched_news_line}</div>"
-                    f"<div style='margin-top:4px;color:#7c2d12;'><strong>出现原因：</strong>{match_reason}</div>"
-                )
+                if is_company_tracking:
+                    detail_label = f"详细新闻 {matched_index}" if matched_index else "详细新闻"
+                    detail_color = "#92400e" if highlight_level == "key" else "#1f4e79"
+                    detail_html = (
+                        f"<div style='margin-top:8px;color:{detail_color};'><strong>对应{detail_label}：</strong>"
+                        f"{matched_news_line}</div>"
+                    )
+                else:
+                    detail_html = (
+                        f"<div style='margin-top:8px;color:#7c2d12;'><strong>对应长新闻：</strong>{matched_news_line}</div>"
+                        f"<div style='margin-top:4px;color:#7c2d12;'><strong>出现原因：</strong>{match_reason}</div>"
+                    )
 
             st.markdown(
                 (
@@ -1353,13 +1282,31 @@ with st.sidebar:
 
         return default
 
-    api_key = _get_runtime_secret("DEEPSEEK_API_KEY", "")
-    gemini_key = _get_runtime_secret("GEMINI_API_KEY", "") or _get_runtime_secret("GOOGLE_API_KEY", "")
+    openrouter_key = _get_runtime_secret("OPENROUTER_API_KEY", "")
+    configured_openrouter_model = str(
+        _get_runtime_secret("OPENROUTER_MODEL_ID", DEFAULT_OPENROUTER_MODEL) or DEFAULT_OPENROUTER_MODEL
+    ).strip()
+    configured_openrouter_reasoning_effort = str(
+        _get_runtime_secret("OPENROUTER_REASONING_EFFORT", DEFAULT_OPENROUTER_REASONING_EFFORT)
+        or DEFAULT_OPENROUTER_REASONING_EFFORT
+    ).strip().lower()
+    if configured_openrouter_reasoning_effort not in OPENROUTER_REASONING_EFFORTS:
+        configured_openrouter_reasoning_effort = DEFAULT_OPENROUTER_REASONING_EFFORT
     tavily_key = _get_runtime_secret("TAVILY_API_KEY", "")
     exa_key = _get_runtime_secret("EXA_API_KEY", "")
     jina_key = _get_runtime_secret("JINA_API_KEY", "")
     gh_token = _get_runtime_secret("GITHUB_TOKEN", "")
     gist_id = _get_runtime_secret("GIST_ID", "")
+    configured_blocked_domains = _get_runtime_secret("NEWS_BLOCKED_DOMAINS", "")
+    if "manual_blocked_domains_text" not in st.session_state:
+        st.session_state.manual_blocked_domains_text = configured_blocked_domains
+    if "persistent_blocked_domains" not in st.session_state:
+        persistent_policy = load_user_source_blocklist(gh_token, gist_id)
+        st.session_state.persistent_blocked_domains = list(persistent_policy.get("domains", []))
+        st.session_state.persistent_blocked_domains_text = "\n".join(
+            st.session_state.persistent_blocked_domains
+        )
+        st.session_state.persistent_blocklist_load_info = persistent_policy
     requested_consumer_provider_config = normalize_search_provider(
         _get_runtime_secret("CONSUMER_DAILY_SEARCH_PROVIDER", DEFAULT_CONSUMER_DAILY_SEARCH_PROVIDER)
     )
@@ -1372,7 +1319,11 @@ with st.sidebar:
     consumer_daily_time_window_config = str(
         _get_runtime_secret("CONSUMER_DAILY_TIME_WINDOW", DEFAULT_CONSUMER_DAILY_TIME_WINDOW) or DEFAULT_CONSUMER_DAILY_TIME_WINDOW
     ).strip().lower()
-    if consumer_daily_time_window_config not in {"today", "24h", "72h", "7d"}:
+    if consumer_daily_time_window_config in {"today", "d"}:
+        consumer_daily_time_window_config = "24h"
+    elif consumer_daily_time_window_config in {"72h", "w", "week"}:
+        consumer_daily_time_window_config = "7d"
+    elif consumer_daily_time_window_config not in {"24h", "7d"}:
         consumer_daily_time_window_config = DEFAULT_CONSUMER_DAILY_TIME_WINDOW
     if "consumer_daily_search_provider" not in st.session_state:
         st.session_state.consumer_daily_search_provider = consumer_daily_provider_config
@@ -1380,74 +1331,97 @@ with st.sidebar:
         st.session_state.consumer_daily_search_depth = consumer_daily_search_depth_config
     if "consumer_daily_time_window" not in st.session_state:
         st.session_state.consumer_daily_time_window = consumer_daily_time_window_config
-    if (api_key or gemini_key) and (tavily_key or exa_key):
-        st.success("🔐 部门专属安全引擎已连接")
-    else:
-        st.error("⚠️ 未检测到可用的搜索或模型密钥，请补充 API Key。")
-
     st.divider()
-    model_id = st.selectbox("核心模型", ["deepseek-chat"], index=0)
-    use_gemini_main = st.toggle(
-        "使用 Gemini AI Studio 作为主模型（保留当前 Prompt）",
-        key="use_gemini_main",
+    openrouter_base_url = DEFAULT_OPENROUTER_BASE_URL
+    openrouter_reasoning_effort = configured_openrouter_reasoning_effort
+    if openrouter_key and (tavily_key or exa_key):
+        st.success("🔐 部门专属安全引擎已连接")
+    elif not openrouter_key:
+        st.warning(
+            "未检测到 OPENROUTER_API_KEY：频道一、频道二的模型分析不可用；"
+            "频道三将使用规则验证简报，频道四和应变片专题仍可使用 Exa 运行。"
+        )
+    else:
+        st.error("未检测到搜索密钥。请在 Streamlit App settings → Secrets 中配置 EXA_API_KEY 或 TAVILY_API_KEY。")
+    st.caption("API Key 仅由服务器端 Secrets 管理；OpenRouter 接口固定使用官方地址。")
+
+    if st.button("刷新 OpenRouter 模型目录", key="refresh_openrouter_model_catalog"):
+        load_openrouter_model_catalog_cached.clear()
+
+    openrouter_model_catalog = ()
+    openrouter_catalog_error = ""
+    try:
+        openrouter_model_catalog = load_openrouter_model_catalog_cached(
+            openrouter_base_url,
+            _api_key=openrouter_key,
+        )
+    except Exception as exc:
+        openrouter_catalog_error = str(exc)
+
+    openrouter_catalog_by_id = {
+        model_info.model_id: model_info for model_info in openrouter_model_catalog
+    }
+    openrouter_model_options = build_openrouter_model_options(
+        openrouter_model_catalog,
+        configured_openrouter_model,
     )
-    gemini_main_preset_col1, gemini_main_preset_col2 = st.columns(2)
-    with gemini_main_preset_col1:
-        if st.button("切到 Gemini 3 Flash", key="btn_gemini_3_flash_main", disabled=not gemini_key):
-            apply_gemini_3_flash_main_preset()
-    with gemini_main_preset_col2:
-        if st.button("尝试 3.1 Flash-Lite", key="btn_gemini_31_flash_lite_main", disabled=not gemini_key):
-            apply_gemini_31_flash_lite_main_preset()
-    gemini_main_model_choice = st.selectbox(
-        "Gemini 主模型",
-        GEMINI_MODEL_OPTIONS,
-        key="gemini_main_model",
-        disabled=not use_gemini_main,
-        format_func=format_gemini_model_option,
+    if "openrouter_model_choice" not in st.session_state:
+        st.session_state.openrouter_model_choice = configured_openrouter_model
+    elif st.session_state.openrouter_model_choice not in openrouter_model_options:
+        st.session_state.openrouter_model_choice = configured_openrouter_model
+    if "openrouter_model_custom" not in st.session_state:
+        st.session_state.openrouter_model_custom = ""
+    openrouter_model_choice = st.selectbox(
+        "OpenRouter 核心模型（可搜索）",
+        openrouter_model_options,
+        key="openrouter_model_choice",
+        format_func=lambda value: format_openrouter_model_option(value, openrouter_catalog_by_id),
     )
-    gemini_main_model_custom = st.text_input(
-        "Gemini 主模型自定义 ID",
-        key="gemini_main_model_custom",
-        disabled=(not use_gemini_main or gemini_main_model_choice != "__custom__"),
-        placeholder="例如：gemini-3.1-flash-lite-preview",
+    openrouter_model_custom = st.text_input(
+        "OpenRouter 自定义模型 ID",
+        key="openrouter_model_custom",
+        disabled=(openrouter_model_choice != "__custom__"),
+        placeholder="例如：qwen/qwen3.7-flash",
     )
-    gemini_main_model = resolve_gemini_model_name(
-        gemini_main_model_choice,
-        gemini_main_model_custom,
-        DEFAULT_GEMINI_MAIN_MODEL,
+    model_id = resolve_model_name(
+        openrouter_model_choice,
+        openrouter_model_custom,
+        DEFAULT_OPENROUTER_MODEL,
     )
-    if use_gemini_main:
-        if gemini_key:
-            st.caption(
-                "主模型可切到 Gemini AI Studio；这会复用当前同一套 Prompt、输出结构和页面，不改业务链路。"
-                " `Gemini 3.1 Flash-Lite` 这里按公开命名规则做了预设，若你的账号尚未开放该预览 ID，可改回 Gemini 3 Flash 或手动填写。"
-            )
+    openrouter_model_info = find_openrouter_model_info(openrouter_model_catalog, model_id)
+    if openrouter_key:
+        st.caption(f"当前主模型：OpenRouter/{model_id}。")
+    else:
+        st.warning("未配置 OPENROUTER_API_KEY，当前 OpenRouter 主模型暂不可用。")
+
+    if openrouter_model_info:
+        supported_parameters = set(openrouter_model_info.supported_parameters)
+        if "structured_outputs" in supported_parameters:
+            structured_mode_label = "严格 JSON Schema"
+        elif "response_format" in supported_parameters:
+            structured_mode_label = "JSON mode"
         else:
-            st.caption("当前未配置 GEMINI_API_KEY 或 GOOGLE_API_KEY，开启后会自动回退为 DeepSeek。")
-    use_gemini_light = st.toggle("启用 Gemini AI Studio 轻任务引擎（保留当前主功能）", key="use_gemini_light")
-    gemini_light_model_choice = st.selectbox(
-        "Gemini 轻任务模型",
-        GEMINI_MODEL_OPTIONS,
-        key="gemini_light_model",
-        disabled=not use_gemini_light,
-        format_func=format_gemini_model_option,
-    )
-    gemini_light_model_custom = st.text_input(
-        "Gemini 轻任务自定义 ID",
-        key="gemini_light_model_custom",
-        disabled=(not use_gemini_light or gemini_light_model_choice != "__custom__"),
-        placeholder="例如：gemini-3.1-flash-lite-preview",
-    )
-    gemini_light_model = resolve_gemini_model_name(
-        gemini_light_model_choice,
-        gemini_light_model_custom,
-        DEFAULT_GEMINI_LIGHT_MODEL,
-    )
-    if use_gemini_light:
-        if gemini_key:
-            st.caption("当前按 Google AI Studio 的 OpenAI 兼容接口接入。轻任务包括：事件主档抽取、切片候选提取。最终长新闻成稿仍由 DeepSeek 负责。")
-        else:
-            st.caption("当前未配置 GEMINI_API_KEY 或 GOOGLE_API_KEY，开启后会自动回退为全 DeepSeek，不影响现有功能。")
+            structured_mode_label = "Prompt + 本地校验"
+        st.caption(
+            f"模型目录：{openrouter_model_info.name}；"
+            f"上下文 {format_token_limit(openrouter_model_info.context_length)} token；"
+            f"最大输出 {format_token_limit(openrouter_model_info.max_completion_tokens)} token；"
+            f"结构化输出 {structured_mode_label}；"
+            f"reasoning {'支持' if 'reasoning' in supported_parameters else '不支持，设置将自动忽略'}；"
+            f"tools {'支持' if 'tools' in supported_parameters else '不支持'}。"
+        )
+        if openrouter_model_info.expiration_date:
+            st.warning(f"该模型目录标记的到期时间为 {openrouter_model_info.expiration_date}，请提前切换模型。")
+    elif openrouter_catalog_error:
+        st.warning(
+            "未能加载 OpenRouter 模型目录，仍可直接填写模型 ID；"
+            f"运行时会执行参数兼容降级。目录错误：{openrouter_catalog_error}"
+        )
+    else:
+        st.warning("当前模型 ID 未在 OpenRouter 文本模型目录中找到；仍允许调用，但会启用保守兼容降级。")
+
+    if openrouter_model_catalog:
+        st.caption(f"已加载 {len(openrouter_model_catalog)} 个可用于当前文本工作流的 OpenRouter 模型。")
     time_opt = st.selectbox("回溯时间线", ["过去 24 小时", "过去 1 周", "过去 1 个月"], index=0)
     search_provider = st.selectbox(
         "搜索引擎",
@@ -1457,6 +1431,95 @@ with st.sidebar:
     )
     enable_finance_chain = st.toggle("上市公司金融补链（更耗 token）", value=False)
     time_limit_dict = {"过去 24 小时": "d", "过去 1 周": "w", "过去 1 个月": "m"}
+
+    with st.expander("🛡️ 信息源屏蔽", expanded=False):
+        builtin_block_rules = get_builtin_block_rules()
+        st.caption(
+            f"内置 {len(builtin_block_rules)} 条域名规则，并检测明确的机器人/AI 自动生成声明。"
+            "永久与临时规则对当前五个频道和标题二次搜索同时生效。"
+        )
+        persistent_blocked_domains_text = st.text_area(
+            "永久屏蔽网站",
+            key="persistent_blocked_domains_text",
+            height=140,
+            placeholder="每行一个域名或完整 URL，例如：\nbitrss.com\nhttps://robot.example.org/news/123",
+            help="删除或增加域名后点击“保存永久名单”。配置 Gist 时会同步到 Gist，否则保存在当前服务器本地文件。",
+        )
+        persistent_input_domains, invalid_persistent_tokens = parse_manual_blocklist(
+            persistent_blocked_domains_text
+        )
+        if st.button("保存永久名单", key="save_persistent_source_blocklist"):
+            save_result = save_user_source_blocklist(
+                persistent_input_domains,
+                github_token=gh_token,
+                gist_id=gist_id,
+            )
+            if save_result.get("local_saved"):
+                st.session_state.persistent_blocked_domains = list(save_result.get("domains", []))
+            st.session_state.persistent_blocklist_load_info = {
+                "domains": list(save_result.get("domains", [])),
+                "source": (
+                    "gist" if save_result.get("remote_saved")
+                    else ("local" if save_result.get("local_saved") else "empty")
+                ),
+                "local_path": save_result.get("local_path", "data/source_blocklist.user.json"),
+                "remote_configured": bool(save_result.get("remote_configured")),
+                "warnings": list(save_result.get("warnings", [])),
+            }
+            if save_result.get("remote_configured") and save_result.get("remote_saved"):
+                st.success(f"永久名单已保存并同步到 Gist，共 {len(save_result.get('domains', []))} 个域名。")
+            elif save_result.get("local_saved"):
+                st.success(f"永久名单已保存到当前服务器，共 {len(save_result.get('domains', []))} 个域名。")
+            else:
+                st.error("永久名单未能保存，请检查服务器目录写权限。")
+        persistent_blocked_domains = list(st.session_state.get("persistent_blocked_domains", []))
+        load_info = dict(st.session_state.get("persistent_blocklist_load_info", {}) or {})
+        if load_info.get("source") == "gist":
+            st.caption(f"已从 Gist 加载 {len(persistent_blocked_domains)} 个永久域名，并建立本地镜像。")
+        else:
+            st.caption(
+                f"当前已保存 {len(persistent_blocked_domains)} 个永久域名；"
+                f"存储文件：{load_info.get('local_path', 'data/source_blocklist.user.json')}"
+            )
+        for warning in load_info.get("warnings", []):
+            st.warning(warning)
+        if invalid_persistent_tokens:
+            invalid_preview = "、".join(invalid_persistent_tokens[:5])
+            st.warning(f"永久名单中以下输入不是有效域名，保存时会忽略：{invalid_preview}")
+
+        manual_blocked_domains_text = st.text_area(
+            "本次运行临时屏蔽网站",
+            key="manual_blocked_domains_text",
+            height=100,
+            placeholder="每行一个域名或完整 URL，例如：\nspam.example.com\nhttps://robot.example.org/news/123",
+            help="只在当前 Streamlit 会话中有效；支持换行、逗号或分号分隔，并覆盖子域名。",
+        )
+        temporary_blocked_domains, invalid_blocked_domain_tokens = parse_manual_blocklist(
+            manual_blocked_domains_text
+        )
+        manual_blocked_domains = list(
+            dict.fromkeys(persistent_blocked_domains + temporary_blocked_domains)
+        )
+        st.caption(
+            f"当前运行共启用 {len(manual_blocked_domains)} 个自定义域名："
+            f"永久 {len(persistent_blocked_domains)} 个，临时 {len(temporary_blocked_domains)} 个。"
+        )
+        if invalid_blocked_domain_tokens:
+            invalid_preview = "、".join(invalid_blocked_domain_tokens[:5])
+            st.warning(f"以下输入不是有效域名，已忽略：{invalid_preview}")
+        if st.checkbox("查看内置屏蔽名单", key="show_builtin_source_blocklist"):
+            st.dataframe(
+                [
+                    {
+                        "域名": rule.get("domain", ""),
+                        "类别": rule.get("category", ""),
+                        "原因": rule.get("reason", ""),
+                    }
+                    for rule in builtin_block_rules
+                ],
+                width="stretch",
+                hide_index=True,
+            )
 
     with st.expander("⚙️ 高级搜索源设置"):
         sites = st.text_area("重点搜索源", get_default_sites_text(), height=250)
@@ -1517,31 +1580,31 @@ with st.sidebar:
 st.title("🧠 商业情报战情室（事件主档统一版）")
 
 if not st.session_state.report_ready:
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📚 频道一：公司追踪（带金融量化）",
         "🌐 频道二：每日宏观行业早报（全域扫描）",
         "📱 频道三：科技消费电子日报",
+        "🧪 频道四：PWG技术情报",
+        "🧲 应变片/六轴力传感器专题",
     ])
 
     with tab1:
         st.markdown("💡 **操作指南**：输入追踪对象，多个目标请使用 `\\` 分开，系统会并发执行独立分析。")
-        query_input = st.text_input("输入追踪对象", "Apple \\ Google")
+        query_input = st.text_input("输入追踪对象", " \\ ".join(DEFAULT_COMPANY_TOPICS))
         start_btn = st.button("🚀 启动并发战情推演", type="primary", key="btn_company")
         active_search_provider, search_notices = resolve_search_provider(search_provider, tavily_key, exa_key)
 
         if start_btn and active_search_provider:
             topics = [topic.strip() for topic in query_input.split("\\") if topic.strip()]
             ai, light_ai, ai_notices = build_ai_stack(
-                api_key,
+                openrouter_key,
                 model_id,
-                use_gemini_light=use_gemini_light,
-                gemini_key=gemini_key,
-                gemini_model=gemini_light_model,
-                use_gemini_main=use_gemini_main,
-                gemini_main_model=gemini_main_model,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_reasoning_effort=openrouter_reasoning_effort,
+                openrouter_model_info=openrouter_model_info,
             )
             if not ai.valid:
-                st.error("当前没有可用的主模型密钥。请配置 DEEPSEEK_API_KEY，或开启 Gemini 主模型并配置 GEMINI_API_KEY / GOOGLE_API_KEY。")
+                st.error("当前没有可用的 OpenRouter 模型密钥。请在 Streamlit App settings → Secrets 中配置 OPENROUTER_API_KEY。")
                 st.stop()
             current_dt = datetime.datetime.now(LOCAL_TZ)
             current_date_str = current_dt.strftime("%Y年%m月%d日")
@@ -1569,6 +1632,7 @@ if not st.session_state.report_ready:
                         search_provider=active_search_provider,
                         exa_key=exa_key,
                         exa_settings=exa_search_settings,
+                        blocked_domains=manual_blocked_domains,
                     )
                     if not raw_results:
                         empty_warning = f"未召回到符合条件的 {topic} 新闻，请扩大搜索源或放宽时间范围。"
@@ -1594,6 +1658,9 @@ if not st.session_state.report_ready:
                         return index, deep_empty, timeline_empty
 
                     event_seed_results = raw_results[:EVENT_BLUEPRINT_INPUT_LIMIT_COMPANY]
+                    from tools.company_strategy import source_level
+                    company_focus_hint += "\n来源账本（仅据URL分级，不代表内容自动证实）：" + json.dumps(
+                        [{"url": r.get("url"), "level": source_level(r.get("url", ""))} for r in raw_results], ensure_ascii=False)
                     history_hint = mem_manager.get_event_bank_summary(topic, limit=4)
                     event_blueprints = build_event_blueprints(
                         ai,
@@ -1632,6 +1699,7 @@ if not st.session_state.report_ready:
                         guidance=company_focus_hint,
                         raw_search_results=analysis_results,
                         map_ai_driver=light_ai,
+                        company_tracking=True,
                     )
 
                     deep_data_res = None
@@ -1647,8 +1715,11 @@ if not st.session_state.report_ready:
                                 exa_key=exa_key,
                                 exa_settings=exa_search_settings,
                                 now=current_dt,
+                                blocked_domains=manual_blocked_domains,
                             )
                             crawl_result["warnings"] = list(crawl_result.get("warnings", [])) + list(title_review_warnings)
+                            deduped_news, evidence_warnings = enforce_company_evidence(deduped_news, raw_results)
+                            crawl_result["warnings"].extend(evidence_warnings)
                         if len(deduped_news or []) < 2:
                             shortage_warning = "在设定时间范围内，未检索到足够多可核实且具有信息增量的高质量新闻。"
                             if shortage_warning not in crawl_result["warnings"]:
@@ -1663,10 +1734,12 @@ if not st.session_state.report_ready:
                                     finance_data = finance_fallback_payload(f"Finance chain failed: {e}")
 
                                 if finance_data.get("is_public"):
-                                    news_summary_text = "\n".join([news.summary for news in deduped_news])
-                                    cats = get_finance_catalysts(ai, topic, news_summary_text)
-                                    if cats:
-                                        finance_data["catalysts"] = cats.model_dump()
+                                    if company_pack.get("id") in {name.lower() for name in strategy_config["companies"]}:
+                                        finance_data["catalysts"] = {}  # Filled once by the evidence-bound overview pass.
+                                    else:
+                                        cats = get_finance_catalysts(ai, topic, "\n".join(news.summary for news in deduped_news))
+                                        if cats:
+                                            finance_data["catalysts"] = cats.model_dump()
 
                             deep_data_res = {
                                 "topic": topic,
@@ -1705,6 +1778,9 @@ if not st.session_state.report_ready:
                         "freshness_stats": freshness_stats,
                         "focus_tags": focus_tags,
                     } if timeline_events else None
+                    if deep_data_res is None:
+                        deep_data_res = {"topic": topic, "data": [], "report_style": "company_tracking", "finance": {}}
+                    deep_data_res["strategy_candidates"] = raw_results
                     return index, deep_data_res, timeline_data_res
                 except Exception as e:
                     trace_text = traceback.format_exc(limit=8)
@@ -1731,6 +1807,22 @@ if not st.session_state.report_ready:
             results.sort(key=lambda item: item[0])
             all_deep_data = [item[1] for item in results if item[1] is not None]
             all_timeline_data = [item[2] for item in results if item[2] is not None]
+            with st.spinner("正在核验官方资本支出与跨公司战略证据..."):
+                strategy_results = {}
+                for section in all_deep_data:
+                    section.setdefault("report_style", "company_tracking")
+                    canonical = get_company_query_pack(section["topic"]).get("id", "")
+                    key = next((name for name in strategy_config["companies"] if name.lower() == canonical), section["topic"])
+                    strategy_results[key] = section.get("strategy_candidates", [])
+                overview = build_strategy_overview(
+                    ai, strategy_results, jina_key=jina_key, now=current_dt,
+                    search_options={"provider": active_search_provider, "exa_key": exa_key, "tavily_key": tavily_key,
+                                    "blocked_domains": manual_blocked_domains,
+                                    "exa_settings": {**exa_search_settings, "_manual_blocked_domains": manual_blocked_domains}},
+                )
+                apply_strategy_to_sections(all_deep_data, overview)
+                for warning in overview["warnings"]:
+                    st.warning(warning)
             mem_manager.save_memory()
             search_runtime = build_run_metadata(
                 requested_provider=search_provider,
@@ -1759,6 +1851,11 @@ if not st.session_state.report_ready:
             "💡 **本频道专为宏观视野打造**：一键搜集全球重点科技赛道最新进展，"
             "**多路并发，全域扫描**。当前已额外强化 PCB/FPC、CPO 光模块、卫星通信、智能车光学与感知。"
         )
+        if not openrouter_key:
+            st.warning(
+                "频道二的搜索与结构化分析目前需要 OpenRouter。服务器端未配置 `OPENROUTER_API_KEY`，"
+                "因此生成按钮已停用；请在 Streamlit App settings → Secrets 中配置后重新运行。"
+            )
         use_all_web = st.toggle("🌐 开启全网无界搜索（打开则无视侧边栏源，进行全球广度覆盖）", value=True)
         search_domain = "" if use_all_web else sites
         cn_sites_default = get_default_china_sites_text()
@@ -1785,32 +1882,34 @@ if not st.session_state.report_ready:
             query_suffix="",
             search_provider_override=None,
             exa_settings_override=None,
-            force_deepseek=False,
+            force_openrouter=False,
             status_label="",
         ):
             resolved_search_provider = search_provider_override or active_search_provider
             resolved_search_settings = exa_settings_override or exa_search_settings
             effective_search_notices = [] if search_provider_override else list(search_notices or [])
 
-            if force_deepseek:
-                ai = AI_Driver(api_key, model_id, provider="deepseek")
+            if force_openrouter:
+                ai = AI_Driver(
+                    openrouter_key,
+                    model_id,
+                    provider="openrouter",
+                    base_url=openrouter_base_url,
+                    reasoning_effort=openrouter_reasoning_effort,
+                    model_info=openrouter_model_info,
+                )
                 light_ai = ai
-                ai_notices = ["本频道固定使用 DeepSeek 生成，不启用 Gemini 主模型或轻任务模型。"]
+                ai_notices = ["本频道使用当前选择的 OpenRouter 模型生成。"]
             else:
                 ai, light_ai, ai_notices = build_ai_stack(
-                    api_key,
+                    openrouter_key,
                     model_id,
-                    use_gemini_light=use_gemini_light,
-                    gemini_key=gemini_key,
-                    gemini_model=gemini_light_model,
-                    use_gemini_main=use_gemini_main,
-                    gemini_main_model=gemini_main_model,
+                    openrouter_base_url=openrouter_base_url,
+                    openrouter_reasoning_effort=openrouter_reasoning_effort,
+                    openrouter_model_info=openrouter_model_info,
                 )
             if not ai.valid:
-                if force_deepseek:
-                    st.error("当前没有可用的 DeepSeek 密钥。频道三固定使用 DEEPSEEK_API_KEY。")
-                else:
-                    st.error("当前没有可用的主模型密钥。请配置 DEEPSEEK_API_KEY，或开启 Gemini 主模型并配置 GEMINI_API_KEY / GOOGLE_API_KEY。")
+                st.error("当前没有可用的 OpenRouter 模型密钥。请在 Streamlit App settings → Secrets 中配置 OPENROUTER_API_KEY。")
                 return [], [], "未启用模型", {}
             current_dt = datetime.datetime.now(LOCAL_TZ)
             current_date_str = current_dt.strftime("%Y年%m月%d日")
@@ -1850,6 +1949,7 @@ if not st.session_state.report_ready:
                             provider=resolved_search_provider,
                             exa_key=exa_key,
                             exa_settings=resolved_search_settings,
+                            blocked_domains=manual_blocked_domains,
                         )
                         if china_mode:
                             results = filter_china_results(results, effective_domains, require_chinese_text=True)
@@ -2002,9 +2102,19 @@ if not st.session_state.report_ready:
 
         col_global, col_cn = st.columns(2)
         with col_global:
-            start_industry_btn = st.button("🚀 一键并发生成《每日宏观行业早报》", type="primary", key="btn_industry")
+            start_industry_btn = st.button(
+                "🚀 一键并发生成《每日宏观行业早报》",
+                type="primary",
+                key="btn_industry",
+                disabled=not bool(openrouter_key),
+            )
         with col_cn:
-            start_cn_industry_btn = st.button("🇨🇳 一键并发生成《中国公司中文站点专题》", type="secondary", key="btn_industry_cn")
+            start_cn_industry_btn = st.button(
+                "🇨🇳 一键并发生成《中国公司中文站点专题》",
+                type="secondary",
+                key="btn_industry_cn",
+                disabled=not bool(openrouter_key),
+            )
 
         if start_industry_btn and active_search_provider:
             all_deep_data, all_timeline_data, active_model_name, search_runtime = run_industry_pipeline(industry_topics, search_domain, china_mode=False)
@@ -2033,8 +2143,9 @@ if not st.session_state.report_ready:
 
     with tab3:
         st.markdown(
-            "💡 **本频道面向 FPC 制造商研发部门**：本轮固定使用 Exa 广度召回与 DeepSeek 生成，"
-            "重点跟踪消费电子、AR/VR/AI眼镜、AI、电动汽车、折叠屏与新型显示、机器人/具身智能，并提高中国国内新闻权重。"
+            "💡 **本频道是中国科技硬件重大新闻简报**：固定使用 Exa 检索，"
+            "聚焦消费电子、智能眼镜、智能汽车、AI 和机器人五类事件。只保留所选一天或一周内可核验的大事件；"
+            "OpenRouter 可用于增强表述，但不是生成客观简报的运行前提。"
         )
         consumer_search_provider = "exa"
         st.session_state.consumer_daily_search_provider = "exa"
@@ -2051,31 +2162,40 @@ if not st.session_state.report_ready:
             st.caption(f"频道三实际搜索：{format_search_provider_label(active_consumer_search_provider)}。本频道不再自动回退 Tavily。")
         for notice in consumer_search_notices:
             st.caption(notice)
+        if st.session_state.get("consumer_daily_search_depth") not in {"light", "normal", "wide"}:
+            st.session_state.consumer_daily_search_depth = DEFAULT_CONSUMER_DAILY_SEARCH_DEPTH
         consumer_search_depth = st.selectbox(
             "频道三 Exa 搜索广度",
             ["wide", "normal", "light"],
             key="consumer_daily_search_depth",
             format_func=lambda value: {
-                "light": "light：每专题约 18 条 query",
-                "normal": "normal：每专题约 36 条 query",
-                "wide": "wide：每专题约 60 条 query（默认）",
+                "light": "light：每专题最多 6 条 query",
+                "normal": "normal：每专题最多 10 条 query（默认）",
+                "wide": "wide：每专题最多 16 条 query",
             }.get(value, value),
         )
+        if st.session_state.get("consumer_daily_time_window") not in {"24h", "7d"}:
+            st.session_state.consumer_daily_time_window = DEFAULT_CONSUMER_DAILY_TIME_WINDOW
         consumer_time_window = st.selectbox(
             "频道三事件验证时间窗口",
-            ["72h", "24h", "today", "7d"],
+            ["24h", "7d"],
             key="consumer_daily_time_window",
             format_func=lambda value: {
-                "today": "仅今天",
                 "24h": "近 24 小时",
-                "72h": "近 72 小时（默认）",
-                "7d": "近 7 天",
+                "7d": "近 7 天（默认）",
             }.get(value, value),
         )
-        st.caption("AI 一周资讯专题在默认 72h 设置下会自动放宽到 7d；正式 PPT 只进入 confirmed/likely 事件。")
-        consumer_topics = get_all_consumer_topic_query_packs()
+        st.caption("所选时间窗是正式边界，不会为了凑数量把一天自动扩大为 72 小时或一周；正式 PPT 只进入 confirmed/likely 事件。")
+        consumer_llm_enhancement = st.toggle(
+            "使用 OpenRouter 生成扩展说明（可选）",
+            value=False,
+            disabled=not bool(openrouter_key),
+            key="consumer_daily_llm_enhancement",
+            help="默认关闭时直接输出经过时间、来源和多源验证的短新闻；打开后沿用详细分析流程。",
+        )
+        consumer_topics = get_channel3_major_news_topic_query_packs()
         st.caption(
-            "固定六专题 Topic Pack："
+            "固定五专题 Topic Pack："
             + "；".join([pack.topic_name for pack in consumer_topics])
         )
         consumer_sites = get_consumer_electronics_sites_text()
@@ -2096,19 +2216,21 @@ if not st.session_state.report_ready:
             resolved_search_settings=None,
             configured_time_window=DEFAULT_CONSUMER_DAILY_TIME_WINDOW,
             search_depth=DEFAULT_CONSUMER_DAILY_SEARCH_DEPTH,
+            enable_llm_enhancement=False,
         ):
             ai, light_ai, ai_notices = build_ai_stack(
-                api_key,
+                openrouter_key,
                 model_id,
-                use_gemini_light=use_gemini_light,
-                gemini_key=gemini_key,
-                gemini_model=gemini_light_model,
-                use_gemini_main=use_gemini_main,
-                gemini_main_model=gemini_main_model,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_reasoning_effort=openrouter_reasoning_effort,
+                openrouter_model_info=openrouter_model_info,
             )
-            if not ai.valid:
-                st.error("当前没有可用的主模型密钥。请配置 DEEPSEEK_API_KEY，或开启 Gemini 主模型并配置 GEMINI_API_KEY / GOOGLE_API_KEY。")
-                return [], [], "未启用模型", {}
+            use_llm_enhancement = bool(enable_llm_enhancement and getattr(ai, "valid", False))
+            if not use_llm_enhancement:
+                if enable_llm_enhancement:
+                    st.warning("OpenRouter 增强不可用，本次自动使用 Exa + 规则验证生成客观简报。")
+                else:
+                    st.info("本次使用 Exa + 规则验证生成客观简报，不调用大模型。")
             if not resolved_search_provider:
                 st.error("频道三当前为 Exa-only 模式。请配置 EXA_API_KEY；本频道不再静默回退 Tavily。")
                 return [], [], ai.label, {}
@@ -2116,14 +2238,19 @@ if not st.session_state.report_ready:
             current_dt = datetime.datetime.now(LOCAL_TZ)
             current_date_str = current_dt.strftime("%Y年%m月%d日")
             current_date_iso = current_dt.date().isoformat()
-            mem_manager = GistMemoryManager(gh_token, gist_id)
-            mem_manager.load_memory()
+            mem_manager = None
+            if use_llm_enhancement:
+                mem_manager = GistMemoryManager(gh_token, gist_id)
+                mem_manager.load_memory()
             reset_search_diagnostics()
-            st.info("🔎 正在启动六专题全流程追踪：Topic Pack → Exa → 时效审查 → 事件主档 → 原文抓取 → map-reduce → 多源验证。")
-            st.caption(f"本频道目标日期：{current_date_iso}；验证窗口：{configured_time_window}。AI 一周资讯默认可放宽到 7d。")
+            st.info("🔎 正在启动五专题重大新闻追踪：Topic Pack → Exa → 发布时间审查 → 去重聚类 → 多源验证 → 客观简报。")
+            st.caption(f"本频道目标日期：{current_date_iso}；严格验证窗口：{configured_time_window}。")
             for notice in ai_notices:
                 st.caption(notice)
-            st.caption(f"本频道复用频道一模型栈：{format_model_stack_name(ai, light_ai)}；不启用金融补链。")
+            if use_llm_enhancement:
+                st.caption(f"本频道使用 OpenRouter `{model_id}` 增强摘要；不启用金融补链。")
+            else:
+                st.caption("本频道使用确定性事件摘要，不启用金融补链。")
             st.caption(f"本次搜索引擎：{format_search_provider_label(resolved_search_provider)}（Exa-only，消费电子日报专用）")
             st.caption(f"Exa 搜索广度：{search_depth}")
             for notice in search_notices or []:
@@ -2146,12 +2273,15 @@ if not st.session_state.report_ready:
                         query_suffix=query_suffix,
                         search_depth=search_depth,
                         max_candidates=120 if search_depth == "wide" else (90 if search_depth == "normal" else 60),
+                        blocked_domains=manual_blocked_domains,
                     )
                     raw_results, freshness_stats, freshness_warnings = filter_consumer_results_by_freshness(
                         raw_results,
                         topic_pack,
                         topic_time_window,
                         current_dt,
+                        verify_page_dates=True,
+                        max_page_checks=8,
                     )
                     freshness_stats.update(search_stats or {})
 
@@ -2164,6 +2294,125 @@ if not st.session_state.report_ready:
                         )
                         deep_empty["report_style"] = "consumer_daily"
                         return index, deep_empty, timeline_empty, None
+
+                    if not use_llm_enhancement:
+                        def verification_search_fn_rules(query, verification_topic_pack, search_time_window=None):
+                            verification_window = search_time_window or topic_time_window
+                            verification_timelimit = "w" if verification_window == "7d" else "d"
+                            return search_web(
+                                query,
+                                "",
+                                verification_timelimit,
+                                max_results=8,
+                                tavily_key="",
+                                provider=resolved_search_provider,
+                                exa_key=exa_key,
+                                exa_settings=resolved_search_settings,
+                                blocked_domains=manual_blocked_domains,
+                            )
+
+                        topic_verified = build_verified_topic_events(
+                            topic_pack_dict,
+                            raw_results,
+                            current_dt.date(),
+                            time_window=topic_time_window,
+                            verification_search_fn=verification_search_fn_rules,
+                            max_initial_events=CONSUMER_DAILY_VERIFICATION_EVENT_LIMIT,
+                            verification_queries_per_event=CONSUMER_DAILY_VERIFICATION_QUERY_LIMIT,
+                            min_events=CONSUMER_DAILY_MIN_EVENTS_PER_TOPIC,
+                            target_events=CONSUMER_DAILY_TARGET_EVENTS_PER_TOPIC,
+                            expansion_query_limit=3,
+                            allow_time_window_expansion=False,
+                        )
+                        topic_output = build_topic_output(
+                            topic_verified,
+                            min_events=CONSUMER_DAILY_MIN_EVENTS_PER_TOPIC,
+                            target_events=CONSUMER_DAILY_TARGET_EVENTS_PER_TOPIC,
+                        )
+                        formal_events = topic_output.main_events
+                        watchlist_events = topic_output.watchlist_events
+                        freshness_stats = {
+                            **dict(freshness_stats or {}),
+                            "enabled": True,
+                            "time_window": topic_verified.time_window,
+                            "raw_count": len(raw_results),
+                            "confirmed_events": len(topic_verified.confirmed_events),
+                            "likely_events": len(topic_verified.likely_events),
+                            "main_events": len(formal_events),
+                            "watchlist_events": len(watchlist_events),
+                            "rejected_or_weak_events": len(topic_verified.rejected_summary),
+                            "expansion_attempts": list(topic_verified.expansion_attempts or []),
+                        }
+
+                        if not formal_events:
+                            deep_empty, timeline_empty = build_empty_section_payload(
+                                topic_label,
+                                warnings=list(topic_verified.warnings) or ["所选时间窗内没有达到正式证据门槛的重大新闻。"],
+                                freshness_stats=freshness_stats,
+                                focus_tags=topic_pack_dict.get("tags", []),
+                            )
+                            deep_empty.update(
+                                {
+                                    "report_style": "consumer_daily",
+                                    "source_mode": "consumer_daily_verified_digest",
+                                    "verified_events": [],
+                                    "watchlist_events": [dataclass_to_dict(event) for event in watchlist_events],
+                                    "rejected_summary": [dataclass_to_dict(item) for item in topic_verified.rejected_summary[:12]],
+                                    "search_provider": resolved_search_provider,
+                                    "insufficient_reason": topic_output.insufficient_reason,
+                                }
+                            )
+                            return index, deep_empty, timeline_empty, topic_verified
+
+                        digest_news = build_verified_digest_news_items(
+                            formal_events,
+                            max_items=CONSUMER_DAILY_TARGET_EVENTS_PER_TOPIC,
+                        )
+                        deep_data_res = {
+                            "topic": topic_label,
+                            "data": digest_news,
+                            "report_style": "consumer_daily",
+                            "search_provider": resolved_search_provider,
+                            "source_mode": "consumer_daily_verified_digest",
+                            "crawler_valid_count": 0,
+                            "warnings": list(freshness_warnings or []) + list(topic_verified.warnings or []),
+                            "extraction_stats": {
+                                "verified_event_count": len(formal_events),
+                                "event_master_count": len(formal_events),
+                            },
+                            "freshness_stats": freshness_stats,
+                            "focus_tags": topic_pack_dict.get("tags", []),
+                            "watch_entities": topic_pack_dict.get("companies", []),
+                            "verified_events": [dataclass_to_dict(event) for event in formal_events],
+                            "watchlist_events": [dataclass_to_dict(event) for event in watchlist_events],
+                            "rejected_summary": [dataclass_to_dict(item) for item in topic_verified.rejected_summary[:12]],
+                            "insufficient_reason": topic_output.insufficient_reason,
+                        }
+                        timeline_events = [
+                            {
+                                "date": event.event_date or event.latest_seen_at or current_date_iso,
+                                "event": event.normalized_title,
+                                "event_summary": event.event_summary,
+                                "source": " / ".join(event.source_names[:3]) or "多源验证",
+                                "source_url": event.evidence_articles[0].url if event.evidence_articles else "",
+                                "confidence_level": event.confidence_level,
+                                "independent_source_count": event.independent_source_count,
+                            }
+                            for event in formal_events
+                        ]
+                        timeline_data_res = {
+                            "topic": topic_label,
+                            "events": timeline_events,
+                            "report_style": "consumer_daily",
+                            "warnings": list(freshness_warnings or []) + list(topic_verified.warnings or []),
+                            "extraction_stats": {
+                                "verified_event_count": len(formal_events),
+                                "event_master_count": len(formal_events),
+                            },
+                            "freshness_stats": freshness_stats,
+                            "focus_tags": topic_pack_dict.get("tags", []),
+                        }
+                        return index, deep_data_res, timeline_data_res, topic_verified
 
                     history_hint = mem_manager.get_event_bank_summary(topic_label, limit=4)
                     event_blueprints = build_event_blueprints(
@@ -2206,6 +2455,7 @@ if not st.session_state.report_ready:
                             provider=resolved_search_provider,
                             exa_key=exa_key,
                             exa_settings=resolved_search_settings,
+                            blocked_domains=manual_blocked_domains,
                         )
 
                     topic_verified = build_verified_topic_events(
@@ -2218,6 +2468,8 @@ if not st.session_state.report_ready:
                         verification_queries_per_event=CONSUMER_DAILY_VERIFICATION_QUERY_LIMIT,
                         min_events=CONSUMER_DAILY_MIN_EVENTS_PER_TOPIC,
                         target_events=CONSUMER_DAILY_TARGET_EVENTS_PER_TOPIC,
+                        expansion_query_limit=3,
+                        allow_time_window_expansion=False,
                     )
                     topic_output = build_topic_output(
                         topic_verified,
@@ -2285,7 +2537,7 @@ if not st.session_state.report_ready:
                         current_dt.date(),
                         topic_verified.time_window,
                     )
-                    verified_material = verified_package_to_deepseek_material(verified_package)
+                    verified_material = verified_package_to_llm_material(verified_package)
                     event_master_material = json.dumps(
                         _serialize_event_blueprints(event_blueprints),
                         ensure_ascii=False,
@@ -2360,6 +2612,7 @@ if not st.session_state.report_ready:
                         {
                             "date": event.event_date or event.latest_seen_at or current_date_iso,
                             "event": event.normalized_title,
+                            "event_summary": event.event_summary,
                             "source": " / ".join(event.source_names[:3]) or "多源验证",
                             "source_url": event.evidence_articles[0].url if event.evidence_articles else "",
                             "confidence_level": event.confidence_level,
@@ -2411,7 +2664,8 @@ if not st.session_state.report_ready:
             all_deep_data = [item[1] for item in results if item[1] is not None]
             all_timeline_data = [item[2] for item in results if item[2] is not None]
             verified_topics = [item[3] for item in results if len(item) > 3 and item[3] is not None]
-            mem_manager.save_memory()
+            if mem_manager is not None:
+                mem_manager.save_memory()
             verified_package = build_verified_news_package(
                 verified_topics,
                 current_dt.date(),
@@ -2452,11 +2706,16 @@ if not st.session_state.report_ready:
                 notices=list(search_notices or []),
                 diagnostics=get_search_diagnostics(),
             )
-            runtime["mode"] = "consumer_daily_full_pipeline"
+            runtime["mode"] = (
+                "consumer_daily_full_pipeline"
+                if use_llm_enhancement
+                else "consumer_daily_verified_digest"
+            )
             runtime["strict_freshness_audit"] = True
             runtime["event_validation_quality_report"] = quality_report_dict
             runtime["consumer_daily_time_window"] = configured_time_window
-            return all_deep_data, all_timeline_data, ai.label, runtime
+            active_generator_label = ai.label if use_llm_enhancement else "Exa 规则验证简报（未调用大模型）"
+            return all_deep_data, all_timeline_data, active_generator_label, runtime
 
         if start_consumer_btn and active_consumer_search_provider:
             all_deep_data, all_timeline_data, active_model_name, search_runtime = run_consumer_daily_pipeline(
@@ -2469,6 +2728,7 @@ if not st.session_state.report_ready:
                 resolved_search_settings=consumer_exa_settings,
                 configured_time_window=consumer_time_window,
                 search_depth=consumer_search_depth,
+                enable_llm_enhancement=consumer_llm_enhancement,
             )
             if all_deep_data or all_timeline_data:
                 store_report_outputs(
@@ -2484,6 +2744,409 @@ if not st.session_state.report_ready:
                 st.error("本次运行没有产出任何有效专题。请查看终端日志，或使用本地调试版查看详细报错。")
         elif start_consumer_btn and not active_consumer_search_provider:
             st.error("频道三当前只使用 Exa。请配置 EXA_API_KEY；Tavily 不再作为频道三默认或自动回退。")
+
+    with tab4:
+        st.markdown(
+            "💡 **频道四：PWG 聚合物光波导技术与产品情报系统**。"
+            "本频道使用独立 `pwg_intelligence/` 模块，复用 Exa 搜索，不写入频道一/三的报告流程。"
+        )
+        st.caption(
+            "输出位置："
+            f"原始结果 `{PWG_DEFAULT_RAW_DIR}`；"
+            f"情报数据库 `{PWG_DEFAULT_WORKBOOK_PATH}`；"
+            f"日报/周报 `{PWG_DEFAULT_REPORT_DIR}`。"
+        )
+        st.caption("本前端入口的采集、分类、评分和报告生成不调用大模型；历史 DeepSeek 离线复核记录仅作为归档保留。")
+
+        pwg_col1, pwg_col2, pwg_col3, pwg_col4 = st.columns(4)
+        with pwg_col1:
+            pwg_max_queries = st.number_input(
+                "PWG query 数",
+                min_value=3,
+                max_value=42,
+                value=10,
+                step=1,
+                key="pwg_max_queries",
+            )
+        with pwg_col2:
+            pwg_results_per_query = st.number_input(
+                "每条 query 结果数",
+                min_value=3,
+                max_value=20,
+                value=6,
+                step=1,
+                key="pwg_results_per_query",
+            )
+        with pwg_col3:
+            pwg_lookback_days = st.number_input(
+                "回溯天数",
+                min_value=1,
+                max_value=30,
+                value=7,
+                step=1,
+                key="pwg_lookback_days",
+            )
+        with pwg_col4:
+            pwg_report_date = st.date_input(
+                "报告日期",
+                value=datetime.datetime.now(LOCAL_TZ).date(),
+                key="pwg_report_date",
+            )
+
+        pwg_write_workbook = st.toggle(
+            "写入 PWG Excel 数据库",
+            value=True,
+            key="pwg_write_workbook",
+            help="关闭后仍会生成 raw JSON、raw Excel、日报和周报，但不覆盖 pwg_intelligence.xlsx。",
+        )
+
+        pwg_run_col1, pwg_run_col2 = st.columns(2)
+        run_pwg_scan = pwg_run_col1.button(
+            "🧪 执行频道四每日采集并生成报告",
+            type="primary",
+            use_container_width=True,
+            key="btn_pwg_daily_scan",
+        )
+        rebuild_pwg_reports = pwg_run_col2.button(
+            "♻️ 基于最近 raw JSON 重新生成报告",
+            use_container_width=True,
+            key="btn_pwg_rebuild_reports",
+        )
+
+        def render_pwg_download(label, path, mime, key):
+            if not path:
+                return
+            file_path = Path(path)
+            if file_path.is_file():
+                with file_path.open("rb") as file_obj:
+                    st.download_button(
+                        label,
+                        file_obj,
+                        file_name=file_path.name,
+                        mime=mime,
+                        key=key,
+                        use_container_width=True,
+                    )
+
+        def render_pwg_markdown_preview(label, path):
+            if not path:
+                return
+            file_path = Path(path)
+            if not file_path.is_file():
+                return
+            with st.expander(label, expanded=False):
+                st.markdown(file_path.read_text(encoding="utf-8")[:5000])
+
+        if run_pwg_scan:
+            if not exa_key:
+                st.error("频道四需要 EXA_API_KEY。请先在 `.streamlit/secrets.toml` 或环境变量中配置。")
+            else:
+                with st.spinner("正在执行 PWG daily_scan、规则分类、机会评分和日报/周报生成..."):
+                    try:
+                        pwg_payload = collect_pwg_daily_scan(
+                            mode="daily_scan",
+                            max_queries=int(pwg_max_queries),
+                            results_per_query=int(pwg_results_per_query),
+                            lookback_days=int(pwg_lookback_days),
+                            provider="exa",
+                            tavily_key="",
+                            exa_key=exa_key,
+                            output_dir=PWG_DEFAULT_RAW_DIR,
+                            workbook_path=PWG_DEFAULT_WORKBOOK_PATH,
+                            write_workbook=bool(pwg_write_workbook),
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        pwg_rows = list(pwg_payload.get("classified_rows") or [])
+                        pwg_daily_path = write_daily_brief(
+                            pwg_rows,
+                            report_date=pwg_report_date,
+                            output_dir=PWG_DEFAULT_REPORT_DIR,
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        pwg_weekly_result = write_weekly_review(
+                            pwg_rows,
+                            end_date=pwg_report_date,
+                            output_dir=PWG_DEFAULT_REPORT_DIR,
+                            workbook_path=PWG_DEFAULT_WORKBOOK_PATH,
+                            update_workbook=bool(pwg_write_workbook),
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        st.session_state.pwg_last_run = {
+                            **pwg_payload,
+                            "output_daily_markdown": str(pwg_daily_path),
+                            "output_weekly_markdown": pwg_weekly_result.get("output_markdown", ""),
+                            "weekly_opportunity_count": pwg_weekly_result.get("opportunity_count", 0),
+                            "output_workbook": pwg_weekly_result.get("output_workbook") or pwg_payload.get("output_workbook", ""),
+                        }
+                        st.success("频道四采集与报告生成完成。")
+                    except Exception as exc:
+                        st.error(f"频道四运行失败：{exc.__class__.__name__}: {exc}")
+                        st.exception(exc)
+
+        if rebuild_pwg_reports:
+            latest_json = find_latest_raw_json(PWG_DEFAULT_RAW_DIR)
+            if not latest_json:
+                st.error("未找到可复用的 PWG raw JSON，请先执行一次频道四每日采集。")
+            else:
+                with st.spinner(f"正在基于 {latest_json.name} 重新生成 PWG 日报和周报..."):
+                    try:
+                        with Path(latest_json).open("r", encoding="utf-8") as file_obj:
+                            latest_payload = json.load(file_obj)
+                        pwg_rows = load_classified_rows_from_json(
+                            latest_json,
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        pwg_daily_path = write_daily_brief(
+                            pwg_rows,
+                            report_date=pwg_report_date,
+                            output_dir=PWG_DEFAULT_REPORT_DIR,
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        pwg_weekly_result = write_weekly_review(
+                            pwg_rows,
+                            end_date=pwg_report_date,
+                            output_dir=PWG_DEFAULT_REPORT_DIR,
+                            workbook_path=PWG_DEFAULT_WORKBOOK_PATH,
+                            update_workbook=bool(pwg_write_workbook),
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        latest_xlsx = Path(latest_json).with_suffix(".xlsx")
+                        st.session_state.pwg_last_run = {
+                            "mode": "daily_scan",
+                            "dry_run": False,
+                            "search_provider": latest_payload.get("search_provider", ""),
+                            "raw_result_count": latest_payload.get("raw_result_count", 0),
+                            "kept_count": latest_payload.get("kept_count", 0),
+                            "manual_review_list": latest_payload.get("manual_review_list", []),
+                            "rule_coverage": latest_payload.get("rule_coverage", {}),
+                            "output_json": str(latest_json),
+                            "output_xlsx": str(latest_xlsx) if latest_xlsx.is_file() else "",
+                            "classified_count": len(pwg_rows),
+                            "classified_rows": pwg_rows,
+                            "output_daily_markdown": str(pwg_daily_path),
+                            "output_weekly_markdown": pwg_weekly_result.get("output_markdown", ""),
+                            "weekly_opportunity_count": pwg_weekly_result.get("opportunity_count", 0),
+                            "output_workbook": pwg_weekly_result.get("output_workbook", ""),
+                        }
+                        st.success("已基于最近 raw JSON 重新生成频道四日报和周报。")
+                    except Exception as exc:
+                        st.error(f"频道四报告重建失败：{exc.__class__.__name__}: {exc}")
+                        st.exception(exc)
+
+        pwg_last_run = st.session_state.get("pwg_last_run")
+        if pwg_last_run:
+            pwg_metrics = st.columns(5)
+            pwg_metrics[0].metric("Raw 结果", int(pwg_last_run.get("raw_result_count", 0) or 0))
+            pwg_metrics[1].metric("过滤后", int(pwg_last_run.get("kept_count", 0) or 0))
+            pwg_metrics[2].metric("已分类评分", int(pwg_last_run.get("classified_count", 0) or 0))
+            pwg_metrics[3].metric("人工复核", len(pwg_last_run.get("manual_review_list") or []))
+            pwg_metrics[4].metric("周报机会", int(pwg_last_run.get("weekly_opportunity_count", 0) or 0))
+            for warning in pwg_last_run.get("warnings", []) or []:
+                st.warning(warning)
+
+            st.markdown("#### 输出文件")
+            output_paths = {
+                "Raw JSON": pwg_last_run.get("output_json", ""),
+                "Raw Excel": pwg_last_run.get("output_xlsx", ""),
+                "PWG Excel 数据库": pwg_last_run.get("output_workbook", "") or str(PWG_DEFAULT_WORKBOOK_PATH),
+                "日报 Markdown": pwg_last_run.get("output_daily_markdown", ""),
+                "周报 Markdown": pwg_last_run.get("output_weekly_markdown", ""),
+            }
+            for label, path in output_paths.items():
+                if path:
+                    st.caption(f"{label}: `{path}`")
+
+            download_cols = st.columns(5)
+            with download_cols[0]:
+                render_pwg_download(
+                    "下载 Raw JSON",
+                    pwg_last_run.get("output_json", ""),
+                    "application/json",
+                    "download_pwg_raw_json",
+                )
+            with download_cols[1]:
+                render_pwg_download(
+                    "下载 Raw Excel",
+                    pwg_last_run.get("output_xlsx", ""),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "download_pwg_raw_xlsx",
+                )
+            with download_cols[2]:
+                render_pwg_download(
+                    "下载 PWG Excel",
+                    pwg_last_run.get("output_workbook", "") or str(PWG_DEFAULT_WORKBOOK_PATH),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "download_pwg_workbook",
+                )
+            with download_cols[3]:
+                render_pwg_download(
+                    "下载日报",
+                    pwg_last_run.get("output_daily_markdown", ""),
+                    "text/markdown",
+                    "download_pwg_daily_md",
+                )
+            with download_cols[4]:
+                render_pwg_download(
+                    "下载周报",
+                    pwg_last_run.get("output_weekly_markdown", ""),
+                    "text/markdown",
+                    "download_pwg_weekly_md",
+                )
+
+            render_pwg_markdown_preview("预览 PWG 日报", pwg_last_run.get("output_daily_markdown", ""))
+            render_pwg_markdown_preview("预览 PWG 周报", pwg_last_run.get("output_weekly_markdown", ""))
+
+            pwg_rows_preview = list(pwg_last_run.get("classified_rows") or [])
+            if pwg_rows_preview:
+                preview_fields = [
+                    "title",
+                    "source_name",
+                    "source_level",
+                    "pwg_category",
+                    "maturity_level",
+                    "opportunity_score",
+                    "needs_manual_review",
+                ]
+                st.dataframe(
+                    [
+                        {field: row.get(field, "") for field in preview_fields}
+                        for row in pwg_rows_preview[:30]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+    with tab5:
+        st.markdown(
+            f"💡 **专题模块：{STRAIN_GAUGE_TECH_MODULES[0]}**。"
+            "本模块独立跟踪机器人六轴力/力矩传感器中的应变片、弹性体、电桥、解耦标定、专利和论文进展，"
+            "不参与 Apple / Google / Tesla 等公司日更主题排序。"
+        )
+        st.caption(
+            "输出位置："
+            f"原始结果 `{STRAIN_GAUGE_DEFAULT_RAW_DIR}`；"
+            f"专题报告 `{STRAIN_GAUGE_DEFAULT_REPORT_DIR}`。"
+        )
+        st.caption("本模块当前复用 Exa 搜索，不调用 Tavily，不新增大模型调用；数量不足时会自动扩大检索窗口并写入校验结果。")
+
+        sg_col1, sg_col2 = st.columns(2)
+        with sg_col1:
+            sg_max_queries = st.number_input(
+                "每类 query 数",
+                min_value=2,
+                max_value=20,
+                value=8,
+                step=1,
+                key="strain_gauge_max_queries",
+            )
+        with sg_col2:
+            sg_results_per_query = st.number_input(
+                "每条 query 结果数",
+                min_value=3,
+                max_value=20,
+                value=6,
+                step=1,
+                key="strain_gauge_results_per_query",
+            )
+
+        run_sg_module = st.button(
+            "🧲 生成应变片 / 六轴力传感器专题",
+            type="primary",
+            use_container_width=True,
+            key="btn_strain_gauge_module",
+        )
+
+        def render_sg_download(label, path, mime, key):
+            if not path:
+                return
+            file_path = Path(path)
+            if file_path.is_file():
+                with file_path.open("rb") as file_obj:
+                    st.download_button(
+                        label,
+                        file_obj,
+                        file_name=file_path.name,
+                        mime=mime,
+                        key=key,
+                        use_container_width=True,
+                    )
+
+        if run_sg_module:
+            if not exa_key:
+                st.error("该专题需要 EXA_API_KEY。请先在 `.streamlit/secrets.toml` 或环境变量中配置。")
+            else:
+                with st.spinner("正在检索新闻、专利和论文，并执行相关性筛选与数量校验..."):
+                    try:
+                        sg_payload = collect_strain_gauge_module(
+                            provider="exa",
+                            tavily_key="",
+                            exa_key=exa_key,
+                            max_queries_per_type=int(sg_max_queries),
+                            results_per_query=int(sg_results_per_query),
+                            blocked_domains=manual_blocked_domains,
+                        )
+                        st.session_state.strain_gauge_last_run = sg_payload
+                        st.success("应变片 / 六轴力传感器专题生成完成。")
+                    except Exception as exc:
+                        st.error(f"专题模块运行失败：{exc.__class__.__name__}: {exc}")
+                        st.exception(exc)
+
+        sg_last_run = st.session_state.get("strain_gauge_last_run")
+        if sg_last_run:
+            quantity = sg_last_run.get("quantity_check", {}) or {}
+            counts = quantity.get("counts", {}) or {}
+            sg_metrics = st.columns(4)
+            sg_metrics[0].metric("新闻/公司动态", int(counts.get("news", len(sg_last_run.get("news", []) or [])) or 0))
+            sg_metrics[1].metric("专利动态", int(counts.get("patent", len(sg_last_run.get("patents", []) or [])) or 0))
+            sg_metrics[2].metric("论文/学术进展", int(counts.get("paper", len(sg_last_run.get("papers", []) or [])) or 0))
+            sg_metrics[3].metric("数量校验", "通过" if quantity.get("passed") else "不足")
+
+            if not quantity.get("passed"):
+                st.warning(f"数量不足：{quantity.get('shortages', {})}")
+
+            st.markdown("#### 输出文件")
+            sg_output_paths = {
+                "Raw JSON": sg_last_run.get("output_json", ""),
+                "Raw Excel": sg_last_run.get("output_xlsx", ""),
+                "专题 Markdown": sg_last_run.get("output_markdown", ""),
+            }
+            for label, path in sg_output_paths.items():
+                if path:
+                    st.caption(f"{label}: `{path}`")
+
+            sg_download_cols = st.columns(3)
+            with sg_download_cols[0]:
+                render_sg_download("下载 Raw JSON", sg_last_run.get("output_json", ""), "application/json", "download_sg_json")
+            with sg_download_cols[1]:
+                render_sg_download(
+                    "下载 Raw Excel",
+                    sg_last_run.get("output_xlsx", ""),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "download_sg_xlsx",
+                )
+            with sg_download_cols[2]:
+                render_sg_download("下载专题报告", sg_last_run.get("output_markdown", ""), "text/markdown", "download_sg_md")
+
+            md_path = Path(sg_last_run.get("output_markdown", "") or "")
+            if md_path.is_file():
+                with st.expander("预览应变片 / 六轴力传感器专题", expanded=False):
+                    st.markdown(md_path.read_text(encoding="utf-8")[:7000])
+
+            preview_rows = []
+            for group_name, key in (("新闻", "news"), ("专利", "patents"), ("论文", "papers")):
+                for row in sg_last_run.get(key, []) or []:
+                    preview_rows.append(
+                        {
+                            "类型": group_name,
+                            "标题": row.get("title", ""),
+                            "日期": row.get("date", ""),
+                            "来源": row.get("source_name", ""),
+                            "相关性": row.get("relevance_level", ""),
+                            "链接": row.get("source_url", ""),
+                        }
+                    )
+            if preview_rows:
+                st.dataframe(preview_rows[:40], use_container_width=True, hide_index=True)
 
 else:
     if not st.session_state.report_celebrated:

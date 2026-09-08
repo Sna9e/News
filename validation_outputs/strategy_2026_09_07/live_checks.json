@@ -1,0 +1,31 @@
+{
+  "model_api_executed": false,
+  "sources": 31,
+  "capex_rows": 0,
+  "strategy_rows": 0,
+  "warnings": [
+    "缺少可用OpenRouter密钥：已执行真实采集，但未生成模型战略判断；保留原始证据供复核。",
+    "未取得可核验单季资本支出：Microsoft、Google、Amazon、Meta。不会用累计值或媒体估计补齐。"
+  ],
+  "ppt": "E:\\Users\\zwz10\\PycharmProjects\\collectNews\\collectNews-main\\validation_outputs\\strategy_2026_09_07\\strategy_live_diagnostic.pptx",
+  "finance": {
+    "Microsoft": {
+      "data_available": true,
+      "data_source": "yahoo_chart",
+      "fundamentals_source": "yahoo_chart+tencent_quote(pe,market_cap)",
+      "history_points": 23,
+      "trailing_pe": 27.84,
+      "price_to_book": null,
+      "range_52w": "349.20 - 553.72"
+    },
+    "Apple": {
+      "data_available": true,
+      "data_source": "yahoo_chart",
+      "fundamentals_source": "yahoo_chart+tencent_quote(pe,market_cap)",
+      "history_points": 23,
+      "trailing_pe": 36.69,
+      "price_to_book": null,
+      "range_52w": "225.95 - 344.57"
+    }
+  }
+}

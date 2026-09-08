@@ -1,5 +1,970 @@
 # HANDOFF.md
 
+## 0U. 2026-09-07 更新：频道一科技战略与跨公司资本投入总览
+
+### 范围与接续状态
+
+- 按用户附件实施增量修改，后经额度恢复继续完成测试，未重建项目。当前目录及父目录没有 `.git`，`git status`/`git diff` 无法提供版本差异；根据会话编辑记录、实际源码与验证输出核对。
+- 原有“搜索/时效审查 → 事件主档/核心时间线 → Jina全文/直连/搜索摘要 → 详细新闻 → 标题复搜 → 金融补链 → 关联/PPT/Word”保留。
+- 在频道一并发公司任务汇合后、`store_report_outputs()` 前增加一次跨公司证据汇总。其他频道、PWG、应变片模块、数据库、搜索供应商接口、模型/密钥读取接口、`report_linker.py`、`chart_generator.py`、`template.pptx` 和 `generate_pro_kline_chart()` 未改。
+
+### 修改文件与关键逻辑
+
+- `tools/company_strategy.json`：集中配置七姐妹、四家云厂商IR域名、技术方向、A-E来源规则、非编辑型子域、中文术语和采集上限。Microsoft的别名、八组中英查询、摘要侧重点与高价值信号也在这里维护。
+- `tools/company_query_packs.py`：原十主题顺序不变，末尾追加 Microsoft；七姐妹战略关键词提高优先级，原 OpenAI/Anthropic/SpaceX/特朗普等主题不删除；`build_company_focus_hint()`补入证据和技术传导要求。
+- `tools/company_strategy.py`：轻量Pydantic结构 `EvidenceClaim / CapexRow / StrategyRow / TrendRow / StrategyOverview`。不新建Agent框架、不另建爬虫、不新增依赖。调用现有搜索与全文兜底函数。
+- `build_strategy_overview()`：复用每家公司最多4条已有候选。四家IR各额外一次查询、最多2份全文，季度材料最多回溯150天；近期战略只复用原新闻窗口内候选，并再限制为30天。Exa的IR请求局部使用普通网页/text模式，不改变其他搜索配置；沿用永久及临时屏蔽规则。七姐妹原独立催化生成改为最多一次跨公司结构化调用，其他公司原催化流程保留。
+- `validate_claim()`/`validate_overview()`：要求摘录确实出现在对应源文本、数字与金额单位不被改写、公司归属一致。CapEx还要求官方全文、季度标识、结束日期与口径在原文可找到，累计期间不能充当单季。每个字段独立保留URL、发布日期与摘录。无证据字段留空，不排名、不估算。
+- 来源等级只代表来源渠道，不代表内容自动属实。`podcasts.apple.com`、论坛、问答和用户建站子域不因母域属于大厂而升级为A级；D/E不支撑重大趋势，传闻不进入确定事实。转载同一通讯社不增加独立来源数。趋势需官方发布/部署证据或多个高质量来源，并有方向性用词；无新闻不等于持平。箭头是证据规则分级，不是统计指数或收益预测。
+- `agents/deep_analyst.py`：增加默认关闭的 `company_tracking` Prompt分支，仅频道一启用，允许按材料缩短三段摘要，不再强行凑380-400字；保留三段标题。最终 `enforce_company_evidence()`在标题复搜之后执行，标识二手报道，拒绝未确认传闻、无匹配材料、旧固定影响兜底和过度确定用语。该门禁之后不再fallback补回。
+- `tools/finance_engine.py`：腾讯美股字段46实测是公司名称，不能当PB；33/34是日内高低价，不能当52周区间。Yahoo仅按缺失字段补PE/PB/市值，备源不能覆盖主源价格/币种/52周区间；校验返回股票代码并拒绝NaN/Infinity/无效OHLC。历史行情供应商顺序、缓存和画图方法不变。
+- `tools/export_ppt.py`：封面之后、原时间线之前新增恰好两页。第一页四家CapEx及最多七项趋势；第二页七姐妹各一行。字段带原文超链接，季度/口径脚注保留；金融页保留股价、涨跌和原图，下方加入技术传导与条件化战略判断。频道一量化缺失显示“暂无可靠数据”，专业术语首次出现加中文说明，不修改原始证据文本。缺模型时明确“未完成模型分析，待复核”，不冒充“无重大信号”。
+- `agent_app.py`：接入上述门禁和总览，只修改频道一分支。七姐妹使用新催化，其他公司继续原催化。Word继续原有导出，不额外加入新总览页。
+- 测试：新增 `tests/test_company_strategy.py`、`tests/run_strategy_live.py`；原 `tests/test_channel1_reference_optimization.py`只更新默认主题断言，包含追加的Microsoft。
+
+### 已完成验证
+
+- 18个 `tests/test_*.py` 脚本回归全部退出0。新增11项测试覆盖配置、来源边界、数字/单位/期间/公司/全文校验、趋势门禁、二手和传闻、腾讯映射、备源不覆盖主源、首次术语解释、FakeAI完整字段透传以及满载PPT。
+- FakeAI测试只调用一次结构化接口，复用搜索/抓取stub；缺模型真实测试不使用FakeAI冒充真实输出。
+- 本地真实测试 `python tests/run_strategy_live.py`：31份材料，其中7份官方财报/IR材料通过网页直连获取；Jina未成功时按原链路回退。Tesla本轮受限官方检索为0，未用低质量来源补数。
+- AAPL/MSFT均通过Yahoo取得23个交易日并绘制原K线，腾讯补到PE和市值。Yahoo Quote鉴权限制及腾讯美股PB不可用仍存在；Forward PE/PB保持缺失，不给伪造数值。
+- `python -m py_compile agent_app.py agents/deep_analyst.py agents/timeline_agent.py tools/company_strategy.py tools/company_query_packs.py tools/finance_engine.py tools/export_ppt.py tools/export_word.py tools/report_linker.py`通过。
+- Streamlit AppTest：0条异常，频道一/二/三/四及应变片专题均正常加载。未改变前端密钥设置方式。
+- 原详细新闻页XML对比不变；新增总览恰好2页；金融图图像字节及位置 `(4.5, 1.2)`、宽度5英寸保持原值。原模板未改。正文/表格采用现有11pt及深蓝/深灰色，不引入新的主题。
+- 已使用本机随附演示文稿渲染器输出PNG并人工查看满载两页总览和金融页，未见文字重叠、裁切或乱码；画布溢出检测通过。未使用LibreOffice，未在用户桌面PowerPoint中逐页播放。
+
+### 输出位置
+
+- 所有本轮输出位于 `validation_outputs/strategy_2026_09_07/`。
+- `strategy_filled_stub.pptx`：填满四家CapEx、七姐妹、趋势及金融催化的DEMO版，仅用于排版测试，不可当真实研报；同名目录含图片。
+- `strategy_stub.pptx`：缺失值、原文链接和新增页数测试；`baseline.pptx`为详细新闻结构对照。
+- `strategy_live_diagnostic.pptx`：真实来源及行情诊断版。包含原文摘录，并明确不是正式中文成稿。
+- `live_evidence.json`、`live_finance.json`、`live_checks.json`：真实来源、接口数据与运行结果。`regression.json`、`stub_checks.json`：回归及结构校验。无密钥写入这些文件。
+
+### 未完成与风险
+
+- 本机 `OPENROUTER_API_KEY`仍缺失，虽然Exa/Jina可用，真实模型端到端未执行。真实CapEx结构化行/公司战略行当前均为0，不能声称已完成真实中文战略成稿。Codex额度恢复不等于项目OpenRouter密钥已配置。
+- 配置模型密钥后应复跑同一真实脚本，并从前端执行一次频道一完整生成，人工核对现金/租赁口径、财报表格列、Guidance年度及改动、金额单位和具体传导关系。无需把密钥发进对话或加前端输入框。
+- 原文连续摘录与数值匹配能阻止多种错配，但不是完整语义证明；错误表格列、单位语义、跨段因果仍须人工抽查。二手来源标识不是免责通行证，重要结论继续优先官方原文。
+- Google等IR检索有时命中活动索引而非财报正文，不能为了填表从标题或索引猜数字；目前会缺项。CFO电话会/PDF附件的可靠召回仍可后续小范围增强。
+- 自动中英文注释可能使极端长文本换行，当前满载测试无明显溢出，真实新模型长文本仍需按同样流程渲染检查。PB/Forward PE无稳定公开值时持续留缺。
+
+## 0T. 2026-09-04 更新：永久域名扩展与金融分析增强
+
+### 范围
+
+- 修改仓库：`E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main`。
+- 本次只扩展全局域名硬屏蔽和频道一金融分析内容。新闻检索主题、摘要、短长新闻关联、频道二/三、PWG、应变片专题、PPT 图表绘制函数和模板均未改变。
+
+### 永久屏蔽
+
+- 用户输入中的 `www.36kr.com` 归一化为 `36kr.com`，`www.xix.ai/?lang=en` 归一化为 `xix.ai`。
+- `tools/source_blocklist.json` 升级为版本 5、36 条规则；新增 `custommapposter.com`、`villadaba.com`、`xix.ai`，原有 6 个指定域名继续保留。
+- `data/source_blocklist.user.json` 现保存 9 个用户指定的永久域名：`bitrss.com`、`dev.to`、`vocus.cc`、`jethrojeff.com`、`36kr.com`、`thevergetoday.pages.dev`、`custommapposter.com`、`villadaba.com`、`xix.ai`。
+- 内置规则与本地永久名单同时存在：前者保证全局硬门禁，后者保证前端永久名单能直接看到和编辑这些域名。
+
+### 金融分析
+
+- `tools/finance_engine.py` 的 `generate_pro_kline_chart()` 未修改。现有 Yahoo/Stooq/Tencent/yfinance 历史行情链、缓存和图表路径保持不变。
+- 新增公开估值字段补充：Yahoo 日线成功后，先尝试 Yahoo Quote；仍缺 PE/PB 时只调用腾讯报价补字段，不重新画图。`data_source` 记录历史行情来源，`fundamentals_source` 单独记录估值来源。
+- 新增 `trailing_pe`、`forward_pe`、`price_to_book`、`earnings_yield_pct`、`ma5`、`ma20`、`return_5d_pct`、`return_20d_pct`、`range_position_52w_pct` 等原始/派生指标。
+- 新增可复现判断：`valuation_assessment`、`price_assessment`、`research_stance`、判断依据和 `risk_flags`。观点仅使用“积极观察 / 中性观察 / 谨慎观察 / 数据不足”，不生成买卖指令或目标价。
+- 原 PPT 的“股权风险溢价”依赖固定 4.2% 假设且未说明日期、币种和期限，现已从页面移除，改为 PE 可用时显示盈利收益率。兼容字段 `erp` 仍保留为未配置状态。
+- PPT 金融页增加 TTM/预期 PE、PB、盈利收益率、估值判断、股价判断、研究观点、观点依据、风险提示、行情/估值来源与免责声明；下方四类事件催化和右侧原行情图继续保留。
+
+### 验证
+
+- `python tests/test_source_blocklist.py`：10 项通过；含 9 个永久域名、`xix.ai` URL 归一化、供应商预排除和本地复检。
+- `python tests/test_finance_engine.py`：6 项通过；含 PE/PB 透传、估值/价格/观点规则、缺失估值不编造和无目标价约束。
+- `python tests/test_finance_ppt_output.py`：通过；最终 PPT 实际包含 TTM/预期 PE、PB、估值判断、股价判断、研究观点、依据、风险和免责声明，且保留原图路径。
+- 真实 AAPL 公共接口烟测：`data_source=yahoo_chart`、23 个交易日；`fundamentals_source=tencent_quote` 补到 TTM PE；生成 `data/cache/finance_charts/kline_AAPL.png`。动态价格和 PE 不写入长期文档。
+- Stub PPT：`validation_outputs/finance_analysis_stub/finance_analysis_stub.pptx`；渲染目录为同名子目录。`slides_test.py` 报告无溢出，金融页图片已人工检查。
+- `python -m compileall -q .`：通过；17 个 `tests/test_*.py` 脚本、128 个测试函数全部通过。
+- Streamlit 已在 `http://127.0.0.1:8506/` 启动并检查：侧栏显示内置 36 条规则、永久 9 个域名、临时 0 个；9 个域名完整显示。Gist 仍返回 HTTP 401，页面已明确回退到本地副本。
+
+### 修改文件
+
+- 配置：`tools/source_blocklist.json`、`data/source_blocklist.user.json`。
+- 业务：`tools/finance_engine.py`、`tools/export_ppt.py`、`agent_app.py`。
+- 测试：`tests/test_source_blocklist.py`、`tests/test_finance_engine.py`、`tests/test_finance_ppt_output.py`。
+- 文档：`docs/SOURCE_BLOCKLIST_GUIDE_CN.md`、`docs/FINANCE_ENGINE_GUIDE_CN.md`、`PLANS.md`、`HANDOFF.md`。
+
+### 风险
+
+- PE/PB 等公开估值接口没有 SLA；失败时必须显示 `N/A`，不能根据股价反推。腾讯美股报价本次能补 TTM PE，但预期 PE/PB 仍可能缺失。
+- 当前估值分档是绝对倍数观察，没有行业可比和盈利增长模型；股价判断只描述均线、近期涨跌和 52 周位置，不代表未来收益预测。
+- 金融催化仍由现有模型基于新闻生成，必须与正式财报、交易所公告和监管文件交叉核验。
+- 本地永久名单已生效；如需 Streamlit Cloud 跨实例恢复，仍需可用 Gist 凭据。当前历史记录中的 Gist 401 问题没有在本次修改凭据。
+
+## 0S. 2026-08-26 更新：垃圾源硬屏蔽与非频道一链路调试
+
+### 范围与边界
+
+- 本次修改仓库为 `E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main`。
+- 频道一的主题、摘要、短长新闻关联、金融补链、PPT/Word 结构和模型流程没有改动；频道一只继承用户明确要求的全局域名硬屏蔽。
+- 重点调试频道二、频道三、频道四 PWG 和频道五应变片专题。真实烟测只调用本地 Exa，没有调用 Tavily，也没有模型调用。
+
+### 来源屏蔽
+
+- `tools/source_blocklist.json` 升级为版本 4，共 33 条内置规则。除用户指定的 `bitrss.com`、`dev.to`、`vocus.cc`、`jethrojeff.com`、`36kr.com`、`thevergetoday.pages.dev` 外，真实频道三输出又确认并屏蔽 `ditrowatch.com`、`collector.com.tr`、`0405.net`、`alto.gab.com`。
+- 域名归一化会删除 `www.`，并覆盖真实子域名；供应商请求前排除和返回结果本地二次检查同时生效。
+- 36Kr 已从 `search_engine.py`、`source_registry.json`、`intelligence_packs.py` 和频道三 query pack 的重点来源中删除。`consumer_daily_validation.py` 中保留的 36Kr 字样仅识别转载和旧数据，不能让 36Kr 重新进入正式结果。
+- 前端原有“永久屏蔽网站”和“本次运行临时屏蔽网站”继续有效。历史 raw JSON/Markdown 不会被自动重写，新运行和从 raw 重建报告时才应用当前名单。
+
+### 频道三
+
+- 前端固定五类：消费电子/手机与新型显示、智能眼镜、智能汽车、AI、机器人。底层第六个折叠屏 pack 仍保留给兼容调用，但频道三不再单独运行它。
+- 时间窗口只允许 24 小时或 7 天；查询上限为 6/10/16。代码默认 `normal=10`，本机 Secrets 仍配置 `wide`，因此前端会尊重本机显式设置并默认 16。
+- 默认流程为 `Topic Pack → Exa → 发布时间审查 → 去重聚类 → 多源验证 → 确定性中文简报`，不需要 OpenRouter；模型增强是可选开关，缺 Key 时自动关闭。
+- 每专题会对排序靠前的 8 个公开页面读取原始发布时间。页面/URL 证据优先于供应商时间，7 天窗口标签已修正，不再误显示“最近24小时”。
+- 正式新闻必须具有中国公司或中国市场事实；`.cn` 域名、中文页面或国内媒体转述本身不构成国内事件证据。已登记消费电子、AI、汽车、显示和机器人专业媒体会按可信来源计分，未知镜像不贡献正式多源证据。
+- 页面日期可信度已从搜索结果透传到候选事件。单篇新闻只有同时满足“已登记官方/专业来源、页面日期已核验、主体/动作/对象完整、具有国内事实、无传闻/超窗原因”时才能进入 `likely`。
+- 事件聚类不再因“AI眼镜、机器人、手机”等通用专题词合并；需要公司/产品实体和足够标题或技术细节重合，避免短标题、摘要和链接错配。
+- 摘要删除记者、发布时间、图片署名、网页省略号和导航噪声；英文标题使用已验证中文事实句生成短标题。未来发布会日期不会覆盖已经发生的公告/报道日期。
+- 发布日历、前瞻、集中亮相、新品大战等汇总稿直接剔除；无官方证据时，多家媒体重复同一传闻仍只算 rumor/观察项。
+- 最终五专题真实轻量运行：Exa 成功 90 次、失败 0 次、返回 564 条。33 条硬屏蔽已生效，正式输出不再出现 `0405.net`/45看点、自动翻译镜像、纯海外 Meta/Perplexity 事件或跨事件摘要；五专题均为 0 条正式新闻并显示不足原因，没有低质补齐。
+- `consumer_phone` 诊断运行：6 个 query、36 条 raw、33 条通过时效审查；抽查 12 个页面并全部提取到日期。高位结果主要来自新浪聚合、网易订阅或未知站；唯一已登记 CNMO 候选为“或将”类消息且专题事实不足，因此正式新闻仍为 0。当前真实瓶颈是权威来源召回率，不是验证流程故障。
+
+### 其他频道
+
+- 频道二：搜索层真实 Exa 查询返回 3 条带发布时间结果。报告生成仍依赖 OpenRouter；本机 `OPENROUTER_API_KEY` 缺失时页面现在直接告警并禁用两个生成按钮。
+- PWG：修复 CLI 未读取 `.streamlit/secrets.toml` 和 Windows GBK 输出崩溃。10-query 真实运行得到 raw 40、过滤后 14、分类 13；全部为 C 级且进入人工复核，规则覆盖率为 100%。日报和周报均成功生成，周报机会数为 0。
+- 应变片专题：专利使用 365/1095 天、论文使用 1095/1825 天的 Exa 显式起止日期；不再把长窗口错误映射成 30 天。轻量真实运行 raw 为新闻 6、专利 12、论文 12，最终新闻 2、专利 0、论文 1，数量门禁正确失败并保留不足说明。
+
+### 修改文件
+
+- 业务代码：`agent_app.py`、`tools/source_blocklist.json`、`tools/search_engine.py`、`tools/source_registry.json`、`tools/intelligence_packs.py`、`tools/consumer_topic_query_packs.py`、`tools/consumer_daily_validation.py`、`tools/export_ppt.py`、`pwg_intelligence/collector.py`、`strain_gauge_intelligence/collector.py`。
+- 测试：`tests/test_source_blocklist.py`、`tests/test_consumer_daily_validation.py`、`tests/test_consumer_daily_exa_breadth.py`、`tests/test_consumer_daily_channel1_pipeline.py`、`tests/test_pwg_collector.py`、`tests/test_strain_gauge_module.py`。
+- 文档：`docs/SOURCE_BLOCKLIST_GUIDE_CN.md`、`docs/PWG_INTELLIGENCE_GUIDE_CN.md`、`docs/STRAIN_GAUGE_SENSOR_MODULE_GUIDE_CN.md`、`PLANS.md`、`HANDOFF.md`。
+
+### 验证输出
+
+- PWG raw：`validation_outputs/channel_debug/pwg_full/daily_scan_2026-08-26.json`、同名 `.xlsx`。
+- PWG 报告：`validation_outputs/channel_debug/pwg_full/reports/PWG_daily_brief_2026-08-26.md`、`PWG_weekly_review_2026-W35.md`。
+- 应变片：`validation_outputs/channel_debug/strain/raw/strain_gauge_module_2026-08-26.json`、同名 `.xlsx`，以及 `validation_outputs/channel_debug/strain/reports/strain_gauge_force_sensor_report_2026-08-26.md`。
+- 十个本轮重点屏蔽域名在上述新验证输出中均未出现。
+- `python -m compileall -q .`：通过。
+- 全量 `tests/test_*.py`：16 个脚本、126 个测试函数全部通过；包括频道一 PPT/时间线/标题门禁回归。
+
+### 未完成与风险
+
+- 本机没有活动 `OPENROUTER_API_KEY`，频道二和频道一的真实模型报告未运行；DeepSeek Key 即使存在也处于禁用状态，不能作为回退。
+- 频道三五专题真实轻量运行已经完成。严格规则产生了空专题，这是本轮搜索结果质量下的预期行为；下一步应提高企业官网和登记专业媒体的查询命中率，不能为了页面丰满恢复预测稿、未知镜像或纯海外事件。
+- PWG 真实保留项全为 C 级且全部需人工复核，说明查询仍容易召回泛 CPO、光纤和材料页面。下一步应增加 PWG 核心术语共现门槛和 A/B 原始来源查询，不应降低评分门槛。
+- 专利普通网页搜索召回不稳定，Google Patents XHR 在本机仍可能返回 503；未绕过反自动化限制。需要稳定的专利 API 或许可数据源。
+- 本地 Secrets 中的 Gist 凭据此前返回 HTTP 401；本次没有改动凭据。永久名单本地保存有效，云端跨实例恢复仍需更新 token 后验证。
+
+## 0R. 2026-08-24 更新：永久信息源屏蔽、发布时间复核与 SpaceX 金融链
+
+### 范围与根因
+
+- 本次修改仓库为 `E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main`。未改变频道二、频道三、PWG、应变片专题的数据模型，也未改变 OpenRouter、Exa、Tavily 的选择逻辑或 PPT 模板。
+- 原前端“手动屏蔽网站”只存在 Streamlit `session_state` 中，页面新会话后丢失；内置名单未包含 `bitrss.com`、`dev.to`、`vocus.cc`、`jethrojeff.com`。
+- 原时效审查只取第一个搜索供应商时间字段。旧文章被聚合站重新发布、供应商错误赋予当前时间或 URL 自带旧日期时，缺少独立证据推翻错误时间戳。
+- 原金融链在 Python 中硬编码公司名，SpaceX 未登记，OpenAI/Anthropic 与“未知公司”没有明确状态边界；腾讯、雪球、`yfinance.info` 任一接口不稳定时容易没有历史数据和图表。
+
+### 信息源屏蔽
+
+- `tools/source_blocklist.json` 升级为版本 2，内置 27 个域名；新增的四个用户确认低可信站点同时进入供应商排除参数和本地二次门禁。
+- `tools/source_blocklist.py` 新增用户永久名单读写。默认本地路径为 `data/source_blocklist.user.json`，采用临时文件 + `os.replace` 原子写入；配置 `GITHUB_TOKEN` 和 `GIST_ID` 时，再同步到同一 Gist 中独立的 `source_blocklist.user.json` 文件。
+- Gist 加载成功后会写本地镜像；Gist 不可用时继续使用本地副本并在页面明确告警。命令行入口也会自动读取本地永久名单。
+- `agent_app.py` 的侧栏现在分别提供“永久屏蔽网站”和“本次运行临时屏蔽网站”。删除/增加永久域名后必须点击“保存永久名单”；页面显示本地/Gist 保存结果、无效输入和当前有效数量。
+- 浏览器验证已将四个域名保存到本地永久名单；新建 Streamlit 会话后自动恢复 4 个域名，五个频道和频道一标题复搜共用同一有效名单。
+
+### 发布时间复核
+
+- `tools/search_engine.py` 保留供应商原始时间为 `provider_published_date`，并新增网页 JSON-LD `datePublished`、发布 meta、带 `Published/发布日期/发布时间` 标签的正文头部和 URL 日期路径解析。
+- 证据优先级为：实时抓取页面日期 → 原始内容 JSON-LD/meta → 页面级字段 → URL 日期路径 → 带标签正文日期 → 供应商时间戳。证据相差超过 48 小时会标记冲突。
+- 频道一过去 24 小时初筛会对排序后的前 18 条候选并发读取公开页面元数据；最终详细新闻标题二次搜索也会再次执行页面日期复核。请求仅访问公开 HTTP/HTTPS 页面，限制读取 400 KB、8 秒超时和最多 6 个并发，不处理本地/私有地址，不绕过登录、验证码或访问控制。
+- 解析后的结果新增 `publication_date_confidence`、`publication_date_conflict`、`publication_date_evidence`；统计新增页面检查数、页面日期提取数、冲突数、仅供应商时间戳数和冲突剔除数。旧 URL 日期或页面日期能够推翻错误的“今日”时间戳并进入现有 warnings。
+- 频道三仍不新增实时页面抓取调用，只复用结果内已有的页面/URL证据，避免改变当日广度检索性能。
+
+### 金融数据与图表
+
+- 新增 `tools/finance_registry.json`。SpaceX 已按 SEC/Nasdaq 官方材料登记为 `SPCX`、`NASDAQ`、`USD`，上市日为 2026-06-12；OpenAI 和 Anthropic 保留为 `pending_listing`，在正式代码确认前不会调用模型猜测股票代码。
+- `tools/finance_engine.py` 改为配置化证券解析。未来 OpenAI/Anthropic 上市只需在注册表中将 `status` 改为 `listed` 并填写已核验的 `ticker/exchange/currency/listed_date/verification_source`。
+- 美股数据源顺序为 `Yahoo Chart JSON → Stooq CSV → Tencent → yfinance history/fast_info`；A/H 股顺序为 `Tencent → Yahoo Chart → Stooq → yfinance`。已移除需要首页 Cookie 的雪球运行路径。
+- 公共行情请求增加有限重试、超时、统一请求头和 15 分钟内存缓存；每次返回保留 `provider_attempts`、耗时、命中源、历史点数和 `as_of`。所有 OHLCV 在画图前执行数值化、日期排序、去重和空值检查。
+- K 线默认写入 `data/cache/finance_charts/`。`mplfinance` 不可用或失败时，自动生成收盘价 + 成交量 Matplotlib 图，不再静默返回空图。
+- Yahoo `chartPreviousClose` 是所选区间之前的收盘价，不能用于日涨跌。本次已改为使用真正的 `previousClose`，缺失时使用历史日线倒数第二个收盘价；该修复来自真实 PPT 图片复核。
+
+### 修改文件
+
+- 修改：`.gitignore`、`agent_app.py`、`tools/source_blocklist.py`、`tools/source_blocklist.json`、`tools/search_engine.py`、`tools/finance_engine.py`、`tests/test_source_blocklist.py`、`docs/SOURCE_BLOCKLIST_GUIDE_CN.md`、`README.md`、`PLANS.md`、`HANDOFF.md`。
+- 新增：`tools/finance_registry.json`、`tests/test_publication_date_validation.py`、`tests/test_finance_engine.py`、`docs/FINANCE_ENGINE_GUIDE_CN.md`。
+- 运行生成：`data/source_blocklist.user.json`（当前四个永久域名）、`data/cache/finance_charts/kline_SPCX.png`、`validation_outputs/finance_spcx_public_smoke.pptx` 及其渲染图片目录。
+
+### 验证
+
+- `python tests/test_source_blocklist.py`：9 项通过，含本地 + fake Gist 双写、远端恢复、前端静态接线和四个内置域名。
+- `python tests/test_publication_date_validation.py`：5 项通过，含旧 URL 推翻今日时间、JSON-LD、实时页面证据冲突、缺失/未来时间和正文历史日期误判保护。
+- `python tests/test_finance_engine.py`：5 项通过，含 SpaceX 注册、OpenAI/Anthropic 待上市、Yahoo 归一化、数据源降级、缓存和 Matplotlib 图表降级。
+- 全量 `tests/test_*.py`：16 个测试脚本、113 个测试函数全部通过。
+- 真实公开行情：`SPCX` 由 `yahoo_chart` 首次请求成功，返回 23 个交易日；本次读取价 136.97 USD、上一交易日收盘 134.00 USD、日变动 2.22%，行情值会随市场变化。
+- 图表：`data/cache/finance_charts/kline_SPCX.png` 为 38,982 字节；已人工检查蜡烛、均线、成交量和坐标轴。
+- PPT：`validation_outputs/finance_spcx_public_smoke.pptx` 共 4 页，第 3 页存在 SpaceX `(SPCX)` 金融标题和 1 张行情图片；`slides_test.py` 报告 `Test passed. No overflow detected.`，渲染图片已人工检查。
+- Streamlit：本地运行于 `http://127.0.0.1:8506/`；浏览器确认永久/临时控件、保存状态、四域名新会话恢复和十主题默认输入正常，未发现设置区域重叠。
+
+### 未验证与风险
+
+- 当前本机 Secrets 中的 Gist 凭据返回 HTTP 401。永久名单已保存在本地并可跨页面会话恢复，但 Streamlit Cloud 文件系统可能随实例重建而丢失；更新有 Gist 写权限的 token 后必须再次验证云端跨重启恢复。文档和日志未写入任何 token 值。
+- Nasdaq 与 Anthropic 页面在本机公开直连日期探测中没有返回可解析日期，可能是拒绝自动访问或页面未暴露标准 meta。系统会继续使用供应商 raw content、URL 日期和供应商时间，并标记证据置信度；不会绕过访问控制。
+- Yahoo、Stooq、Tencent 和 `yfinance` 均不提供本项目可依赖的服务等级承诺。多源降级显著降低空图概率，但不能保证所有市场、停牌证券或刚上市首日都有数据。
+- 本次没有调用 Exa、Tavily 或 OpenRouter 完整生成日报，不能把日期规则测试和真实 `SPCX` 行情验证视为十主题真实新闻端到端验证。
+
+## 0Q. 2026-08-18 更新：频道一参考仓库优化
+
+### 范围与参考结论
+
+- 本次只优化频道一的十个公司/主题、短新闻摘要、短长新闻对应关系及重点高亮；未改变频道二、频道三、PWG、应变片专题、金融补链、搜索供应商配置或 PPT 母版。
+- 已只读扫描 `E:\Users\zwz10\PycharmProjects\News-main_0818\News-main` 的全部文件，并解析其中 24 个 Python 文件。参考仓库与当前仓库的 `timeline_agent.py`、`deep_analyst.py`、`company_query_packs.py`、`report_linker.py`、`export_ppt.py` 及频道一测试文件哈希一致，因此不存在遗漏补丁可直接复制；本次是在当前共同基线上继续收紧逻辑。
+- 参考输出暴露的主要问题是：摘要 fallback 偏向前几句、`event_id` 被无条件信任、模糊匹配可多对一、所有已展开短新闻都使用同一种橙色高亮，以及详细新闻缺少明确编号。
+
+### 实现
+
+- `tools/company_query_packs.py`
+  - 新增 `DEFAULT_COMPANY_TOPICS`，顺序为 Apple、Google、Amazon、OpenAI、Meta、Nvidia、Tesla、特朗普、Anthropic、SpaceX。
+  - 十个主题各自拥有 `summary_focus`、`high_value_signals`、补充权威域名和三组补充查询，覆盖产品版本、模型/API、芯片与数据中心、供应链、Robotaxi/Optimus、关税与出口管制、Claude、Starship/Starlink 等差异化内容。
+- `agents/timeline_agent.py`
+  - `event_summary` 统一为通常 3-4 句、建议 100-180 字。
+  - fallback 对句子按事件标题、关键词、动作和具体参数评分，从相关锚点向后保留上下文，避免新闻前部泛科技导语挤掉事件事实。
+  - 摘要质量评分同步按 100-180 字和 3-4 句选择，不再沿用旧的 100-220 字口径。
+- `agents/deep_analyst.py`
+  - 规范化 URL 后优先回填/纠正 `event_id`；只有 URL 无法对齐时才保留或改用语义映射。
+  - Prompt 增加证据化 importance 规则：5 分限于重大正式发布、已生效重大政策、量产交付或有数字支撑的标志事件；4 分用于实质产品、客户、资本开支、产能和供应链节点；热点词本身不能提高分数。
+- `tools/report_linker.py`
+  - 匹配顺序改为同一规范化原文 URL → 经标题/摘要/来源/日期复核的 event_id → 全局一对一语义匹配。
+  - 每条详细新闻增加 `detail_index`；短新闻增加 `matched_news_index`、`matched_news_importance`、`match_method` 和 `highlight_level`。
+  - `importance >= 4` 标记为 `key`，普通已展开新闻标记为 `linked`；一个详细新闻最多承接一条短新闻，未通过门槛的短新闻保持未关联。
+- `tools/export_ppt.py`、`tools/export_word.py`、`agent_app.py`
+  - 重点短新闻使用橙色星标，普通已展开短新闻使用深蓝色圆点；历史延续标记继续保留。
+  - 时间线显示“详见后文：详细新闻 N《标题》”，详细页标题显示“详细新闻 N｜标题”。
+  - 频道一不展示内部 event_id 和长 match_reason；这些字段仍保留在数据中用于排错。PPT 摘要仍为 Pt(11)、RGB(31,78,121)，每页最多 3 条，原文 hyperlink 保持不变。
+  - Streamlit 页面默认输入十个主题，频道一预览同样区分橙/蓝高亮并隐藏长匹配原因。
+
+### 修改文件
+
+- `agent_app.py`
+- `agents/timeline_agent.py`
+- `agents/deep_analyst.py`
+- `tools/company_query_packs.py`
+- `tools/report_linker.py`
+- `tools/export_ppt.py`
+- `tools/export_word.py`
+- `tests/test_channel1_timeline_summary.py`
+- `tests/test_channel1_reference_optimization.py`（新增）
+- `PLANS.md`
+- `HANDOFF.md`
+
+### 验证
+
+- `python -m compileall -q agent_app.py agents tools pwg_intelligence strain_gauge_intelligence setup_api_keys.py tests`：通过。
+- 全量 `tests/test_*.py`：14 个测试脚本、102 个测试函数全部通过。
+- 新增频道一专项 4 项：十主题内容包、URL 优先 ID 修正、URL/event_id/语义匹配优先级与一对一约束、PPT 编号和两级颜色均通过。
+- 更新后的时间线专项 10 项通过，包含相关句优先、3-4 句/100-180 字、噪声清理、字段透传和每页最多 3 条。
+- 本地 stub PPT：`validation_outputs/channel1_reference_optimized_stub.pptx`。
+- 图片渲染目录：`validation_outputs/channel1_reference_optimized_stub/`；总览图：`validation_outputs/channel1_reference_optimized_stub_montage.png`。
+- `slides_test.py`：`Test passed. No overflow detected.`；已人工检查时间线页及详细新闻页图片，没有发现文字重叠、截断或编号错位。
+- Streamlit 已完整重启并运行在 `http://127.0.0.1:8506/`。浏览器确认频道一默认输入十个主题、五个频道入口完整、无异常堆栈和明显布局问题。
+- 参考仓库源代码未修改。视觉审查工具在参考目录生成了 `test_channel1_ppt_soft_review_output/` 和 `stub_validation_channel1_timeline_links/` 两个只含渲染 PNG 的临时目录；当前执行环境阻止删除操作，因此未自动清理。
+
+### 未验证与风险
+
+- 本次使用 stub 数据，不读取真实 API Key，也未调用 Exa、Tavily 或 OpenRouter completion；不能把本地 PPT 和规则测试视为真实端到端新闻质量验证。
+- 重点高亮依赖模型按新 rubric 输出 `importance`。真实运行需抽查 4/5 分是否有硬证据，避免模型把普通更新标成重点。
+- URL 优先匹配会移除常见追踪参数，但不同媒体的转载 URL 不会被视为同一原文；这类情况仍依赖 event_id 或语义匹配。
+- 一对一约束会有意让重复或证据不足的短新闻保持未关联，而不是都指向同一详细页。若真实数据出现“一条详细新闻确实合并多个时间线节点”的合法场景，需要基于样本再设计明确的合并标记，不能直接恢复无约束多对一。
+- 修改包含新模块级常量。正在运行的旧 Streamlit 进程只做热重载时可能保留旧模块缓存并出现一次导入错误；部署或本地升级后应完整重启 Streamlit，当前服务已按此处理。
+
+## 0P. 2026-08-18 更新：Streamlit Secrets 与 OpenRouter 单一前端
+
+### 最终交互方式
+
+- 上一版新增的浏览器会话 Key 输入已按部署要求撤销。API Key 不再出现在业务页面，只从 Streamlit Cloud `App settings → Secrets`、服务器环境变量或本地 `.streamlit/secrets.toml` 读取。
+- OpenRouter Base URL 固定使用 `https://openrouter.ai/api/v1`；页面不再显示地址输入框，旧 `OPENROUTER_BASE_URL` 配置不会影响当前应用。
+- 前端只保留 OpenRouter 可搜索模型目录和自定义模型 ID。reasoning 继续使用服务端配置或默认值，不再作为页面控件。
+- Gemini 主模型、轻任务模型、模型预设、自定义 ID 和状态说明均已从前端删除；三条业务模型构建路径统一使用当前 OpenRouter 模型。
+
+### 配置方式
+
+Streamlit Cloud 的 Secrets 至少配置：
+
+```toml
+OPENROUTER_API_KEY = "sk-or-v1-..."
+EXA_API_KEY = "..."
+```
+
+按实际搜索功能可继续配置 `TAVILY_API_KEY`、`JINA_API_KEY`、`GITHUB_TOKEN` 和 `GIST_ID`。Secrets 不会回填到页面。
+
+### 修改与验证
+
+- 修改：`agent_app.py`、`setup_api_keys.py`、`tests/test_qwen_llm_driver.py`、`README.md`、`PLANS.md`、`HANDOFF.md`。
+- `setup_api_keys.py` 将 Gemini Key 和旧 `OPENROUTER_BASE_URL` 标为禁用历史项：已有值可保留，但应用不读取，也不再提示新用户配置。
+- 静态回归锁定：页面不得出现 Key 输入、Base URL 输入、reasoning 选择或 Gemini 模型控件；应用必须从服务器端读取 `OPENROUTER_API_KEY` 并使用固定官方端点。
+- `python -m py_compile agent_app.py tools/llm_driver.py setup_api_keys.py tests/test_qwen_llm_driver.py`：通过。
+- `python tests/test_qwen_llm_driver.py`：11 项通过；新增用例覆盖服务器端 Secrets、固定端点和 OpenRouter-only 前端约束。
+- 全量 `tests/test_*.py`：13 个测试脚本、97 个测试函数全部通过。
+- `python setup_api_keys.py --show`：活动模型密钥只检查 `OPENROUTER_API_KEY`；Gemini Key 显示为 disabled，旧 Base URL 不再显示为活动设置。
+- Streamlit 浏览器自动检查：密码输入 0 个，Key/Base URL/reasoning/Gemini 控件均为 0；模型目录和自定义模型 ID 各为 1。自定义模型选择提交成功，并已恢复默认 `qwen/qwen3.7-flash`。
+- 页面截图检查无明显重叠或截断；本地验证地址为 `http://127.0.0.1:8506/`。
+- 本次修改未调用 OpenRouter completion API，也未在测试中使用真实 Key。
+
+## 0N. 2026-08-17 更新：全局垃圾与机器人网站屏蔽
+
+### 根因
+
+- 原代码只有 Tavily 的社交站点排除、新闻来源质量降权和各专题自己的零散低质量判断，没有统一的硬拦截层。
+- Exa、Tavily、频道三查询包、PWG 和应变片 collector 的调用路径不同，单改某一供应商或某一频道会留下旁路。
+- 原前端只能设置重点搜索源，不能在不改代码的情况下临时屏蔽新发现的自动聚合站。
+
+### 实现
+
+- 新增 `tools/source_blocklist.json`：集中维护 23 个保守的自动聚合、低可信转载和非正文平台域名，以及 12 个明确的机器人/AI/RSS 自动生成声明。
+- 新增 `tools/source_blocklist.py`：支持完整 URL、域名、`www.`、端口、路径、IDN、`*.` 输入规范化；采用“域名完全相同或真实子域名”匹配，避免 `notexample.com` 被 `example.com` 误伤。
+- `tools/search_engine.py` 在 Exa 请求中发送 `excludeDomains`，在 Tavily 请求中发送 `exclude_domains`；供应商返回后再执行本地复检。Exa 的 `company/people` 类别不发送官方不支持的排除参数，但仍执行本地复检。
+- 搜索诊断新增 `source_blocking`，记录拦截总数、按域名/类别统计和最多 20 条抽样原因。
+- `agent_app.py` 侧栏新增 `信息源屏蔽`：可粘贴域名或完整 URL、查看规范化数量和无效项、展开内置名单。手动规则已传入频道一初搜及标题复搜、频道二、频道三初搜及验证搜索、PWG 和应变片专题。
+- `setup_api_keys.py` 新增 `NEWS_BLOCKED_DOMAINS`；也可直接使用同名环境变量。
+- PWG 与应变片 collector 对自定义 `search_fn` 返回结果再次本地检查，避免测试 stub 或未来替代搜索实现绕过门禁；Google Patents 兜底也执行同一检查。
+- PWG 从历史 raw JSON 重建日报/周报时会按当前名单再次过滤，避免旧缓存重新进入报告或机会表；原始 JSON 不会被改写。
+
+### 文件
+
+- 新增：`tools/source_blocklist.py`、`tools/source_blocklist.json`、`tests/test_source_blocklist.py`、`docs/SOURCE_BLOCKLIST_GUIDE_CN.md`。
+- 修改：`tools/search_engine.py`、`tools/consumer_topic_query_packs.py`、`pwg_intelligence/collector.py`、`pwg_intelligence/reporter.py`、`strain_gauge_intelligence/collector.py`、`agent_app.py`、`setup_api_keys.py`、`README.md`、`docs/PWG_INTELLIGENCE_GUIDE_CN.md`、`docs/STRAIN_GAUGE_SENSOR_MODULE_GUIDE_CN.md`、`PLANS.md`。
+
+### 验证
+
+- `python tests/test_source_blocklist.py`：8 项通过。
+- 全量 `tests/test_*.py`：13 个测试脚本、96 个测试函数全部通过；频道一标题门禁、频道三 Exa 广度/完整链、PWG collector/报告重建、应变片专题均包含在回归范围内。
+- `python -m py_compile agent_app.py setup_api_keys.py tools/source_blocklist.py tools/search_engine.py tools/consumer_topic_query_packs.py pwg_intelligence/collector.py strain_gauge_intelligence/collector.py agents/deep_analyst.py agents/timeline_agent.py tools/export_ppt.py tools/export_word.py tools/report_linker.py tests/test_source_blocklist.py`：通过。
+- `tools/source_blocklist.json` 自动解析检查通过：23 个域名、12 个自动内容标记。
+- Streamlit 浏览器实测：粘贴 2 个有效域名和 1 个无效值后，页面显示手动屏蔽 2 个域名并提示无效项；内置 23 条规则表可展开，页面无重叠。测试输入已清空。
+- 未调用真实 Exa/Tavily，也未消耗模型 API；本次门禁行为使用 provider stub 和真实请求 payload 捕获验证。
+
+### 风险与后续
+
+- 永久硬屏蔽的误伤成本高。当前名单有意保守；门户中仍可能存在原始报道的站点继续交给原有来源降权和人工复核，而不是全部硬封。
+- 自动生成声明只匹配配置中的强标记，无法识别不披露自动生产方式的新站点；应根据 `source_blocking` 诊断把反复出现的域名人工核实后加入 JSON。
+- 手动规则覆盖域名全部子域。输入企业官网主域前应确认不会同时屏蔽其新闻中心、论文或专利页面。
+
+## 0M. 2026-08-17 更新：OpenRouter 通用多模型适配
+
+本次在 0L 的 OpenRouter Qwen3.7 Flash 迁移基础上，将模型层升级为 OpenRouter 通用方案。`qwen/qwen3.7-flash` 仍是默认值，但不再是代码能力假设或前端可选范围；用户可从实时模型目录选择其他厂商模型，也可直接填写任意 OpenRouter 模型 ID。
+
+### 根因与设计边界
+
+- 旧实现对所有 OpenRouter 模型固定发送 Qwen 使用的 `reasoning`、`response_format`、`temperature` 和 8,192 `max_tokens`。
+- OpenRouter 每个模型的 `supported_parameters` 和最大输出不同；直接替换模型 ID 可能导致无可用端点、参数被忽略、输出上限越界或结构化结果失败。
+- 新实现不做自动模型替换，避免在用户不知情时改变费用、质量或数据策略。兼容回退只移除当前模型明确不支持的请求参数。
+- DeepSeek 直连接口继续禁用。OpenRouter 目录不会按模型厂商品牌过滤；若用户主动选择 `deepseek/...`，请求仍只发送到 OpenRouter，而不是 `api.deepseek.com`。
+
+### 通用模型目录
+
+- `tools/llm_driver.py` 新增 `OpenRouterModelInfo`、`fetch_openrouter_model_catalog()`、`build_openrouter_model_options()` 和 `find_openrouter_model_info()`。
+- 目录请求使用 `GET /api/v1/models`，限定 `output_modalities=text` 并按 `most-popular` 排序。
+- 只保留可接受文本输入且输出文本的模型，记录：模型 ID、名称、上下文、最大 completion、支持参数、输入/输出模态和到期时间。
+- Streamlit 对目录缓存 1 小时，并提供“刷新 OpenRouter 模型目录”按钮。目录加载失败不会阻断自定义模型调用。
+- 前端模型下拉支持搜索完整目录；`OPENROUTER_MODEL_ID` 仍是自由字符串，不需要修改 Python 代码即可换模型。
+
+### 能力自适应
+
+- `structured_outputs`：优先发送 `response_format.type=json_schema`、Pydantic Schema 和 `strict=true`。
+- `response_format`：不支持严格 Schema 但支持 JSON mode 时，发送 `response_format.type=json_object`。
+- 两者都不支持：保留 JSON system prompt，并用本地 Pydantic 做最终结构验证。
+- `reasoning`：仅在目录声明支持时发送；`auto` 表示不发送 reasoning 参数，其他选项为 `none/minimal/low/medium/high/xhigh`。
+- `temperature`、`max_tokens`：目录未声明支持时不发送；输出长度自动取业务请求值与 `top_provider.max_completion_tokens` 的较小值。
+- 所有能力参数继续配合 `provider.require_parameters=true`，只路由到支持当前参数组合的端点。
+- 对目录未知模型或端点能力临时变化，只在明确的参数兼容错误下，按 `reasoning`、严格结构化输出、JSON mode、temperature、max_tokens 逐项降级后重试。
+
+### 前端和配置
+
+- `agent_app.py` 页面标题改为“OpenRouter 多模型部门情报中心”，模型控件改为“OpenRouter 核心模型（可搜索）”。
+- 选中模型后显示上下文、最大输出、结构化输出模式、reasoning、tools 和到期信息。
+- 频道一、频道二、频道三调用均传入当前模型元数据；频道四和应变片专题仍不调用 LLM。
+- 频道三运行提示显示实际 `model_id`，不再写死 Qwen3.7 Flash。
+- Gemini 可选主模型/轻任务模型的回退提示改为“当前 OpenRouter 模型”。
+- `tools/export_word.py` 标题改为“AI 企业级深度科技研报”。
+- `setup_api_keys.py` 的 `OPENROUTER_MODEL_ID` 继续支持任意字符串，`OPENROUTER_REASONING_EFFORT` 增加 `auto` 和 `xhigh`。
+
+### 修改文件
+
+- `tools/llm_driver.py`
+- `agent_app.py`
+- `setup_api_keys.py`
+- `tools/export_word.py`
+- `tests/test_qwen_llm_driver.py`（沿用历史文件名，内容已升级为通用 OpenRouter 多模型测试）
+- `PLANS.md`
+- `HANDOFF.md`
+
+### 本地验证
+
+- OpenRouter 公共目录真实请求成功：本次解析出 414 个文本工作流模型，其中 335 个声明 `structured_outputs`、356 个声明 `response_format`、283 个声明 `reasoning`。
+- 默认 `qwen/qwen3.7-flash` 被正确识别为 1,000,000 上下文、65,536 最大输出，支持 JSON mode、reasoning 和 tools。
+- 浏览器实际切换到 `amazon/nova-micro-v1`：页面识别为 128,000 上下文、5,120 最大输出、不支持 reasoning 和 JSON mode，并显示“Prompt + 本地校验”；随后恢复默认 Qwen。
+- 浏览器输入目录外自定义 ID `vendor/new-model-alias`：前端保留该 ID、显示目录未验证提示并启用保守参数降级，没有强制替换模型；验证后已恢复默认模型。
+- OpenRouter 多模型专项 stub：10 项通过，覆盖目录解析、任意 ID、严格 Schema、JSON mode、纯文本模型、token 上限、参数兼容回退、`auto/xhigh` 和 DeepSeek 强制禁用。
+- 全量 `tests/test_*.py`：12 个测试脚本、87 项测试全部通过。
+- `python -m compileall -q agent_app.py agents tools pwg_intelligence strain_gauge_intelligence setup_api_keys.py tests`：通过。
+- 运行时审计未发现 `api.deepseek.com`、`deepseek-chat`、旧 DeepSeek/DashScope/Qwen 密钥读取或 DeepSeek provider。
+- Streamlit 已完整重启并运行在 `http://127.0.0.1:8506`；模型目录、能力提示和五个频道均正常，无页面级导入错误。
+
+### 尚未完成
+
+- 本机 `OPENROUTER_API_KEY` 仍为 `missing`，因此没有执行收费模型的真实 Chat Completions 请求，也没有声称完成真实模型端到端验证。
+- 配置 Key 后，建议至少真实验证两类模型：一类支持 `structured_outputs`，另一类不支持 JSON/reasoning，以覆盖两条生产路径。
+
+### 官方依据
+
+- `https://openrouter.ai/docs/guides/overview/models`
+- `https://openrouter.ai/docs/api/api-reference/models/get-models`
+- `https://openrouter.ai/docs/guides/features/structured-outputs`
+- `https://openrouter.ai/docs/guides/routing/provider-selection`
+- `https://openrouter.ai/docs/guides/best-practices/reasoning-tokens`
+
+## 0L. 2026-08-17 更新：DeepSeek 暂停，主模型迁移到 OpenRouter Qwen3.7 Flash
+
+本次按用户确认的 OpenRouter 接入方式完成主模型切换。DeepSeek 运行接口已停用：应用不再读取 `DEEPSEEK_API_KEY`，不再创建 DeepSeek client，也不会在 OpenRouter 或 Gemini 不可用时自动回退到 DeepSeek。旧 DeepSeek、DashScope 和 Qwen Key 仅由配置脚本原样保留，避免覆盖用户已有配置，但不会参与请求。
+
+### 模型与接口核验
+
+- OpenRouter 的正式模型 ID 为 `qwen/qwen3.7-flash`，默认 API Base URL 为 `https://openrouter.ai/api/v1`。
+- OpenRouter 模型页与公开 Models API 显示：该模型上下文长度为 1,000,000 token，最大 completion 为 65,536 token，支持文本、图片和视频输入。
+- Models API 列出的请求能力包含 `reasoning`、`response_format`、`tools`、`tool_choice`、`temperature`、`top_p` 和 `max_tokens`。
+- 当前模型未在 Models API 中声明严格 `json_schema` structured output，因此结构化任务使用兼容性更高的 `response_format={"type":"json_object"}`，同时在 system prompt 中附带 Pydantic JSON Schema。
+- OpenRouter Qwen 默认设置 `reasoning={"effort":"none","exclude":true}`，避免推理内容混入 JSON；前端可选择 `none/minimal/low/medium/high`。
+- 请求附带 `provider.require_parameters=true`，要求 OpenRouter 只路由到支持当前参数的上游端点。
+- 官方依据：
+  - `https://openrouter.ai/qwen/qwen3.7-flash`
+  - `https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion`
+  - `https://openrouter.ai/docs/guides/features/structured-outputs`
+  - `https://openrouter.ai/docs/guides/best-practices/reasoning-tokens`
+  - `https://openrouter.ai/docs/guides/routing/provider-selection`
+
+### 修改文件与行为
+
+- 新增 `tools/llm_driver.py`
+  - 统一封装 OpenRouter Qwen 与保留的 Gemini 可选驱动。
+  - OpenRouter 默认模型为 `qwen/qwen3.7-flash`，默认输出上限 8,192 token，请求超时 120 秒，SDK 重试 2 次。
+  - 结构化请求使用 JSON mode；仅当服务明确拒绝 `response_format` 时，才降级为纯文本 JSON 指令重试。
+  - `provider="deepseek"` 不解析 Base URL，驱动保持无效状态。
+- 修改 `agent_app.py`
+  - 页面标题改为 `OpenRouter Qwen 部门情报中心`。
+  - 运行时读取 `OPENROUTER_API_KEY`、`OPENROUTER_MODEL_ID`、`OPENROUTER_BASE_URL` 和 `OPENROUTER_REASONING_EFFORT`。
+  - 侧边栏提供 Qwen3.7 Flash、Qwen3.7 Plus、Qwen3.6 Flash、自定义模型 ID、API 地址和推理强度配置。
+  - 频道一、频道二、频道三主模型全部使用统一 OpenRouter 驱动；频道四和应变片专题原本不调用 LLM，行为保持不变。
+  - Gemini 仍是显式可选的主模型/轻任务模型；Gemini 不可用时只能回退到 OpenRouter Qwen。
+- 修改 `setup_api_keys.py`
+  - 新增 OpenRouter 密钥与模型设置；旧 DeepSeek、DashScope/Qwen 密钥和旧 Qwen 设置标记为 `disabled; preserved only`。
+  - `--show` 只输出 `configured/missing`，不打印 Key 内容或首尾字符。
+- 修改 `agents/qa_agent.py`，文本问答通过统一驱动发送，使 OpenRouter reasoning 设置同样生效。
+- 修改 `tools/consumer_daily_validation.py`，新增供应商无关名称 `verified_package_to_llm_material()`，旧函数名仅作为兼容别名保留。
+- 修改 `tools/export_word.py`，Word 报告标题从 DeepSeek 品牌切换为 Qwen。
+- 修改 `docs/PWG_INTELLIGENCE_GUIDE_CN.md`，明确历史 DeepSeek 离线复核仅作为归档，PWG 前端仍不调用 LLM。
+- 新增 `tests/test_qwen_llm_driver.py`，覆盖 OpenRouter 请求参数、JSON mode 降级、推理强度和 DeepSeek 禁用。
+
+### 本地配置
+
+```powershell
+cd E:\Users\zwz10\PycharmProjects\collectNews\collectNews-main
+python setup_api_keys.py
+```
+
+在 `OPENROUTER_API_KEY` 提示处直接粘贴 OpenRouter Key。默认 `OPENROUTER_MODEL_ID` 保持 `qwen/qwen3.7-flash`，默认 `OPENROUTER_BASE_URL` 保持 `https://openrouter.ai/api/v1`。可用 `python setup_api_keys.py --show` 检查状态，该命令不会打印 Key 明文。
+
+### 验证结果
+
+- OpenRouter 公共 Models API 实查通过：`qwen/qwen3.7-flash` 存在，上下文 1,000,000，最大 completion 65,536，并声明支持 `reasoning`、`response_format` 和工具参数。
+- `python -m py_compile agent_app.py tools\llm_driver.py setup_api_keys.py agents\qa_agent.py tools\consumer_daily_validation.py tools\export_word.py tests\test_qwen_llm_driver.py`：通过。
+- `python -m compileall -q agent_app.py agents tools pwg_intelligence strain_gauge_intelligence setup_api_keys.py tests`：通过。
+- `python tests\test_qwen_llm_driver.py`：6 项通过，覆盖模型 ID、Base URL、JSON mode、reasoning、`provider.require_parameters`、response-format 兼容降级、DeepSeek provider 禁用和前端密钥读取约束。
+- 全部 `tests/test_*.py`：12 个测试脚本、82 项测试全部通过。
+- 运行时静态审计：`agent_app.py`、`agents/`、`tools/` 中没有 DeepSeek API URL、`deepseek-chat`、DeepSeek/DashScope/Qwen 旧密钥读取或 DeepSeek provider；底层 `chat.completions.create()` 只保留在统一驱动内一处。
+- Streamlit 已在 `http://127.0.0.1:8506` 重新启动。浏览器检查确认 OpenRouter Qwen3.7 Flash、模型 ID、API 地址、推理强度、DeepSeek 停用提示和五个频道均存在，未出现 `Traceback`、`ImportError` 或 `ModuleNotFoundError`。
+- 从迁移前已运行的 Streamlit 进程直接热重载会保留旧模块缓存，并曾触发一次常量导入错误；完整重启进程后已消失。部署或本地升级后必须重启 Streamlit，不应只依赖热重载。
+- `python setup_api_keys.py --show` 确认本机当前未配置 `OPENROUTER_API_KEY`；因此尚未执行真实 Qwen3.7 Flash 鉴权请求或频道一端到端生成，不能把公共 Models API、stub 或 UI 验证当成真实模型调用。
+
+### 风险与边界
+
+- OpenRouter 会在支持模型的多个上游间路由；`provider.require_parameters=true` 可保证参数兼容，但不固定具体上游。若需要固定供应商，后续需显式配置 provider order。
+- 目前使用 JSON mode 而非严格 `json_schema`，结构校验仍由本地 Pydantic 完成；模型返回字段不完整时，该次结构化结果会失败并触发现有业务兜底。
+- 代码和历史文档中仍可能出现 DeepSeek 文字：新闻检索对象/关键词、历史验证记录及兼容函数别名不属于 DeepSeek API 运行路径，不应批量删除。
+
+## 0K. 2026-06-22 更新：新增应变片 / 机器人六轴力传感器独立专题模块
+
+本次新增独立技术专题模块“应变片与机器人六轴力传感器”。该模块不并入 Apple、Google、Tesla 等公司日更主题，不占用频道一或频道三详细新闻配额；前端作为独立 tab 触发。
+
+新增文件：
+- `strain_gauge_intelligence/__init__.py`
+- `strain_gauge_intelligence/models.py`
+- `strain_gauge_intelligence/collector.py`
+- `strain_gauge_intelligence/reporter.py`
+- `strain_gauge_intelligence/config/keywords.yaml`
+- `strain_gauge_intelligence/config/companies.yaml`
+- `strain_gauge_intelligence/config/report_rules.yaml`
+- `tools/strain_gauge_query_packs.py`
+- `tests/test_strain_gauge_module.py`
+- `docs/STRAIN_GAUGE_SENSOR_MODULE_GUIDE_CN.md`
+
+修改文件：
+- `agent_app.py`
+  - 新增 tab：`🧲 应变片/六轴力传感器专题`。
+  - 该 tab 调用 `collect_strain_gauge_module()`，固定复用 Exa，不调用 Tavily，不新增 LLM 调用。
+  - 前端显示新闻、专利、论文数量和数量校验结果，并提供 JSON/XLSX/Markdown 下载。
+- `PLANS.md`
+  - 新增应变片专题任务清单。
+- `HANDOFF.md`
+  - 记录本次实现、测试和真实验证结果。
+
+新增配置项：
+- `TECH_MODULES = ["应变片与机器人六轴力传感器"]`
+- 英文名：`Strain Gauge and Robotic Six-Axis Force/Torque Sensor`
+- 固定公司主题仍保留在 `MANDATORY_TOPICS` 中，不受影响。
+
+新增关键词：
+- 中文：应变片、箔式应变片、薄膜应变片、柔性应变传感器、六轴力传感器、六维力传感器、六分力传感器、机器人腕部力传感器、机器人关节力传感器、惠斯通电桥、全桥应变测量、温度补偿、解耦算法、标定矩阵、FPC应变片等。
+- 英文：strain gauge、foil strain gauge、thin film strain gauge、flexible strain sensor、six-axis force/torque sensor、multi-axis force sensor、robot wrist force torque sensor、Wheatstone bridge、temperature compensation、decoupling algorithm、calibration matrix、FPC strain gauge 等。
+
+数据结构：
+- `StrainGaugeIntelligenceItem`
+  - 通用字段：`item_type`、`title`、`date`、`source_name`、`source_url`、`summary`、`relation_to_sensor`、`fpc_implication`、`relevance_level`。
+  - 专利字段：`publication_number`、`applicant`、`country_or_region`、`core_solution`、`reference_point`。
+  - 论文字段：`authors_or_institutions`、`venue`、`doi_or_link`、`research_object`、`sensing_structure`、`key_methods_metrics`、`engineering_value`。
+- `StrainGaugeModulePayload`
+  - 包含 `news`、`patents`、`papers`、`quantity_check`、`searched_windows` 和 `warnings`。
+
+真实验证：
+- 运行命令：
+  - `python -m strain_gauge_intelligence.collector --provider exa --max-queries-per-type 6 --results-per-query 6 --overwrite`
+- 输出文件：
+  - `data/strain_gauge_intelligence/raw/strain_gauge_module_2026-06-22.json`
+  - `data/strain_gauge_intelligence/raw/strain_gauge_module_2026-06-22.xlsx`
+  - `data/strain_gauge_intelligence/reports/strain_gauge_force_sensor_report_2026-06-22.md`
+- 生成数量：
+  - 新闻 / 公司动态：7 条。
+  - 专利动态：0 条。
+  - 论文 / 学术进展：4 条。
+- 数量校验：
+  - 未通过。原因是专利条目不足。
+  - 模块没有静默跳过，报告已明确写入不足原因和已检索范围：新闻 30 天、专利 12 个月和 3 年、论文 3 年。
+- 本次收紧：
+  - 摘要不再直接拼接短英文搜索片段。
+  - 删除免责声明式兜底语，并在测试中覆盖禁用语。
+  - 排除明显低质量/泛产品页和博客型来源，宁愿减少数量也不凑数。
+
+真实来源链接抽样：
+- 新闻：
+  - `https://embodiedglobal.com/en/article/bluepoint-touch-c-plus-plus-force-sensor-funding-2026`
+  - `https://finance.sina.com.cn/roll/2026-06-05/doc-iniaiyyr1683712.shtml`
+  - `https://36kr.com/p/3381031938352899`
+  - `https://36kr.com/p/3739230862802945`
+  - `https://blog.robotiq.com/robotiq-releases-tsf-85-digital-twin-on-nvidia-isaac-sim?hs_amp=true`
+- 论文：
+  - `https://nature.com/articles/s41528-026-00604-x`
+  - `https://sciencedirect.com/science/article/abs/pii/S2211285526003800`
+  - `https://nature.com/articles/s41378-026-01364-4`
+  - `https://link.springer.com/article/10.1007/s00170-026-18440-8`
+- 专利：
+  - 本次真实运行没有通过字段完整性和相关性校验的专利条目，因此无正式专利链接输出。
+
+已执行验证：
+- `python tests\test_strain_gauge_module.py`
+- `python tests\test_pwg_query_packs.py`
+- `python tests\test_pwg_collector.py`
+- `python tests\test_pwg_reports.py`
+- `python -m py_compile agent_app.py tools\strain_gauge_query_packs.py strain_gauge_intelligence\__init__.py strain_gauge_intelligence\models.py strain_gauge_intelligence\collector.py strain_gauge_intelligence\reporter.py tests\test_strain_gauge_module.py`
+
+风险和后续优化：
+- 普通 Exa 搜索不适合直接承担专利库检索，容易召回 CNIPA 公告页、新闻页或 USPTO 通知页，而不是具体专利文献。
+- Google Patents XHR 兜底在真实验证时出现 503 或无结果，不能作为稳定生产依赖。
+- 后续应接入稳定专利 API 或专利库解析器，例如 Lens、PatentsView、CNIPA 批量检索、企业专利监控服务。
+- 当前新闻摘要仍主要来自搜索摘要，已增加规则化中文摘要和低质量来源过滤，但后续仍建议接入正文抓取和更严格信源质量分级。
+- 当前论文作者/机构和实验指标为规则抽取，建议后续接入 DOI 元数据或论文正文解析。
+
+## 0J. 2026-06-18 更新：频道四 PWG Streamlit 前端入口上线验证
+
+本次将已完成的 PWG 情报系统接入现有 Streamlit 前端，作为独立“频道四：PWG技术情报”。保持最小改动；没有修改频道一、频道二、频道三的处理链路，没有修改 `tools/search_engine.py` 接口行为，也没有把 PWG 输出混入原有 Word/PPT 报告状态机。
+
+已完成：
+- `agent_app.py`
+  - 将首页 tab 从 3 个扩展为 4 个，新增 `🧪 频道四：PWG技术情报`。
+  - 频道四调用现有 `pwg_intelligence.collector.collect_pwg_daily_scan()`，固定使用 Exa，不调用 Tavily。
+  - 支持设置 query 数、每 query 结果数、回溯天数、报告日期和是否写入 `pwg_intelligence.xlsx`。
+  - 支持一键执行 daily_scan 并生成日报/周报。
+  - 支持基于最近 raw JSON 重新生成日报/周报，不重新消耗搜索额度。
+  - 前端显示 Raw 结果数、过滤后数量、分类评分数量、人工复核数量和周报机会数。
+  - 前端提供 Raw JSON、Raw Excel、PWG Excel、日报 Markdown、周报 Markdown 下载入口。
+- `pwg_intelligence/reporter.py`
+  - 报告层新增英文摘要中文化展示逻辑。原始 `factual_summary` 仍保留在 JSON/Excel 中，日报/周报展示时优先输出中文事实句。
+  - 对英文摘要提取技术关键词和明确数字，例如 `Micro LED`、`CPO`、`USD 848 million`、`2030`，避免直接把英文 Exa 摘要原句写入中文报告。
+- `PLANS.md`
+  - 标记频道四前端入口和前端真实跑通完成。
+
+本地真实前端验证：
+- 启动临时 Streamlit：`http://127.0.0.1:8504`。
+- 浏览器确认 `🧪 频道四：PWG技术情报` tab 可见，内容区、执行按钮和重建按钮可见，无导入错误。
+- 前端按钮触发真实 Exa daily_scan：
+  - query 数：10。
+  - 每 query 结果数：6。
+  - 回溯：7 天。
+  - Raw 结果：60 条。
+  - 过滤后：40 条。
+  - 分类评分：34 条。
+  - 人工复核：32 条。
+- 前端重建报告按钮验证：
+  - 可基于最近 raw JSON 重新生成日报和周报。
+  - Raw/过滤/分类统计能正确回填，不再显示 0。
+
+本次输出：
+- `data/pwg_intelligence/raw/daily_scan_2026-06-18.json`
+- `data/pwg_intelligence/raw/daily_scan_2026-06-18.xlsx`
+- `data/pwg_intelligence/pwg_intelligence.xlsx`
+- `data/pwg_intelligence/reports/PWG_daily_brief_2026-06-18.md`
+- `data/pwg_intelligence/reports/PWG_weekly_review_2026-W25.md`
+
+已执行验证：
+- `python -m py_compile agent_app.py pwg_intelligence\reporter.py`
+- `python -m py_compile agent_app.py pwg_intelligence\__init__.py pwg_intelligence\models.py pwg_intelligence\excel_store.py pwg_intelligence\collector.py pwg_intelligence\classifier.py pwg_intelligence\pwg_source_policy.py pwg_intelligence\pwg_scoring.py pwg_intelligence\reporter.py tools\pwg_query_packs.py`
+- `python tests\test_pwg_intelligence_phase1.py`
+- `python tests\test_pwg_query_packs.py`
+- `python tests\test_pwg_collector.py`
+- `python tests\test_pwg_phase4_rules.py`
+- `python tests\test_pwg_reports.py`
+
+验证说明：
+- 本机未安装 `pytest`，因此按项目现有方式直接执行测试脚本。
+- 本次前端入口没有调用 DeepSeek；DeepSeek 仍用于离线质量复核，不进入频道四前端 daily_scan 主流程。
+- 本次没有调用 Tavily。
+
+剩余风险：
+- 当前 PWG 前端仍是第一版操作台，没有用户权限、历史批次对比和 Excel 增量合并。
+- `pwg_intelligence.xlsx` 仍按现有写入逻辑重建 DEMO 骨架 + 本轮入选行，尚未实现历史正式数据增量合并。
+- 报告中文化摘要是规则化展示，不是 LLM 翻译；复杂英文标题仍可能保留产品名、机构名和英文技术术语。
+
+## 0I. 2026-06-09 更新：PWG 本地 Exa + DeepSeek 真实输出验证与改进
+
+本次按要求使用本地 `.streamlit/secrets.toml` 中的 `EXA_API_KEY` 和 `DEEPSEEK_API_KEY` 做了一轮真实验证。没有打印或泄露密钥；没有修改频道一、频道二、频道三，也没有改 `tools/search_engine.py` 接口行为。
+
+真实验证链路：
+- Exa：执行 PWG `daily_scan`，`max_queries=10`，`results_per_query=6`，最近 7 天。
+- Collector 输出：
+  - `data/pwg_intelligence/raw/daily_scan_2026-06-09.json`
+  - `data/pwg_intelligence/raw/daily_scan_2026-06-09.xlsx`
+  - `data/pwg_intelligence/pwg_intelligence.xlsx`
+- Reporter 输出：
+  - `data/pwg_intelligence/reports/PWG_daily_brief_2026-06-09.md`
+  - `data/pwg_intelligence/reports/PWG_weekly_review_2026-W24.md`
+- DeepSeek：对日报和周报做 JSON 质量审查，审查结果保存：
+  - `data/pwg_intelligence/reports/pwg_validation_2026-06-09.json`
+  - `data/pwg_intelligence/reports/pwg_validation_after_fix_2026-06-09.json`
+  - `data/pwg_intelligence/reports/pwg_validation_final_2026-06-09.json`
+
+首轮结果：
+- Exa raw result：60 条。
+- 基础过滤后：35 条。
+- 分类后：33 条。
+- DeepSeek 首轮评价：`usable`。
+- 主要问题：
+  - 周报同一线索在多个章节重复。
+  - 二手标准媒体被误判为 A 级原始信源。
+  - 论文页被归入竞品动作，FPC 关系不准。
+  - Hakusan 产品页摘要含网页导航噪声。
+
+已按反馈改进：
+- `pwg_intelligence/pwg_source_policy.py`
+  - 收紧 A 级来源：标准、专利、论文只有命中原文/权威域名才判 A。
+  - 将 `convergedigest.com` 作为专业媒体 C 级来源处理。
+- `pwg_intelligence/classifier.py`
+  - 增加论文域名/出版平台信号，例如 `link.springer.com`、`springer nature`、`PhotoniX`。
+  - 增加 CPO 强规则：标题/摘要明确包含 `CPO`、`co-packaged optics`、`optical engine` 等时优先归入 `cpo_datacenter`，避免被 `fiber array` 误归为 connector。
+- `pwg_intelligence/pwg_scoring.py`
+  - 调整成熟度：普通 `mass production/量产` 归为 M6；只有 `stable/volume production/稳定量产/规模化生产` 才归为 M7。
+- `pwg_intelligence/reporter.py`
+  - 周报章节改为单条线索只进入一个分析章节，减少重复。
+  - 日报高价值阈值从 55 调整为 50，仍过滤 D 级、DEMO、占位和低置信度线索。
+  - 清理网页摘要噪声，如 `Internal Control Policy`、导航型 `Product - ...` 片段。
+  - C 级来源在报告中显示为 `C（间接证据，需核实原始来源）`。
+  - FPC 关系按分类补充验证关注点。
+
+最终输出观察：
+- 日报高价值线索：2 条。
+  - Largan CPO / fiber array pilot line：C 级间接证据，M5。
+  - Hakusan PMT / MT ferrule 产品页：A 级，公司产品页，M6。
+- 周报入选重要线索：2 条。
+- 周报机会行：2 条，已写入 `opportunities` 工作表。
+- DeepSeek 最终评价：整体良好，但仍建议后续继续细化 FPC 关系和摘要完整度。
+
+已执行验证：
+- `python tests\test_pwg_intelligence_phase1.py`
+- `python tests\test_pwg_query_packs.py`
+- `python tests\test_pwg_collector.py`
+- `python tests\test_pwg_phase4_rules.py`
+- `python tests\test_pwg_reports.py`
+- `python -m py_compile pwg_intelligence\__init__.py pwg_intelligence\models.py pwg_intelligence\excel_store.py pwg_intelligence\collector.py pwg_intelligence\classifier.py pwg_intelligence\pwg_source_policy.py pwg_intelligence\pwg_scoring.py pwg_intelligence\reporter.py tools\pwg_query_packs.py tests\test_pwg_intelligence_phase1.py tests\test_pwg_query_packs.py tests\test_pwg_collector.py tests\test_pwg_phase4_rules.py tests\test_pwg_reports.py`
+
+剩余风险：
+- 当前仍基于 Exa 返回摘要和页面片段，未接入 crawler 抓正文，摘要可能不完整。
+- 周报/日报阈值和分类映射仍是 Python 规则，尚未 YAML 化。
+- `pwg_intelligence.xlsx` 仍是 DEMO 骨架 + 本轮入选行重建，不做历史正式数据增量合并。
+
+## 0H. 2026-06-09 更新：频道四 PWG 第五阶段日报和周报输出
+
+本次继续保持频道四独立开发；没有修改 `agent_app.py`，没有修改频道一、频道二、频道三流程，也没有改 `tools/search_engine.py`。第五阶段新增 Markdown 报告输出和周报机会漏斗更新。
+
+已完成：
+- 新增 `pwg_intelligence/reporter.py`
+  - 从第四阶段 raw JSON 的 `classified_rows` 生成报告。
+  - 默认读取 `data/pwg_intelligence/raw/daily_scan_*.json`。
+  - 不调用搜索 API，不调用大模型。
+- 日报输出：
+  - 文件名：`PWG_daily_brief_YYYY-MM-DD.md`
+  - 默认输出目录：`data/pwg_intelligence/reports/`
+  - 命令：
+    - `python -m pwg_intelligence.reporter --mode daily --date 2026-06-09`
+    - `python -m pwg_intelligence.reporter --mode daily --input-json data/pwg_intelligence/raw/daily_scan_2026-06-09.json --date 2026-06-09`
+  - 只保留新增高价值线索，剔除 D 级来源、DEMO、低分、低置信度和占位/免责声明文本。
+  - 分类输出：
+    - 新产品与样品
+    - 厂商动态
+    - 车载应用
+    - CPO与数据中心
+    - 连接器与接口
+    - 材料与工艺
+    - 标准、专利与论文
+  - 空分类直接省略。
+- 周报输出：
+  - 文件名：`PWG_weekly_review_YYYY-WXX.md`
+  - 命令：
+    - `python -m pwg_intelligence.reporter --mode weekly --date 2026-06-09`
+    - `python -m pwg_intelligence.reporter --mode weekly --date 2026-06-09 --no-workbook`
+  - 合并最近 7 天 raw JSON，去重后按机会评分、来源等级和时间排序，最多保留 20 条。
+  - 包含：
+    - 本周新增硬证据
+    - 竞品动作
+    - 应用机会变化
+    - 技术路线变化
+    - 值得验证的样件
+    - 需要联系的厂商、供应商或高校
+    - 仍然缺少的证据
+- 更新 `pwg_intelligence/excel_store.py`
+  - `create_pwg_intelligence_workbook()` 和 `write_pwg_intelligence_rows()` 支持 `extra_opportunity_rows`。
+  - 周报默认生成机会漏斗行，并更新 `opportunities` 工作表。
+- 新增 `data/pwg_intelligence/reports/.gitkeep`。
+- 更新 `docs/PWG_INTELLIGENCE_GUIDE_CN.md`
+  - 增加第五阶段日报、周报、命令和 opportunities 更新说明。
+- 更新 `PLANS.md`
+  - 标记第五阶段日报、周报和机会表更新完成。
+- 新增 `tests/test_pwg_reports.py`
+  - 验证日报过滤、去重、字段完整和空分类省略。
+  - 验证日报文件名。
+  - 验证周报 7 天窗口、去重、Top 20 和必需章节。
+  - 验证周报机会行生成和 `opportunities` 写入。
+
+已执行验证：
+- `python tests\test_pwg_reports.py`
+- `python -m py_compile pwg_intelligence\reporter.py pwg_intelligence\excel_store.py tests\test_pwg_reports.py`
+
+待完成：
+- 尚未用真实 Exa/Tavily 搜索结果生成日报/周报。
+- 周报更新 Excel 当前仍是 DEMO 骨架 + 本轮入选行重建，不做历史正式数据增量合并；需要保留历史正式数据时应先备份旧 Excel。
+- 尚未接入 Streamlit 频道四入口。
+- 尚未把日报/周报阈值和分类映射迁移为 YAML 配置。
+
+## 0G. 2026-06-09 更新：频道四 PWG 第四阶段分类、来源等级、成熟度和机会评分
+
+本次继续保持频道四独立开发；没有修改 `agent_app.py`，没有修改频道一、频道二、频道三流程，也没有改 `tools/search_engine.py` 的既有行为。第四阶段只在 PWG 模块内增加规则分类、来源策略、成熟度判断和机会评分。
+
+已完成：
+- 新增 `pwg_intelligence/classifier.py`
+  - 支持分类：`automotive`、`connector`、`cpo_datacenter`、`material_process`、`standard`、`patent`、`paper`、`exhibition`、`company_update`。
+  - 输出 `classification_reason` 和匹配关键词。
+- 新增 `pwg_intelligence/pwg_source_policy.py`
+  - 自动标记来源等级 A-D。
+  - A：标准原文、公司官网、Datasheet、论文原文、专利原文。
+  - B：官方会议 PPT、协会材料、展会官方资料、公司访谈。
+  - C：专业媒体、行业研报和普通专业来源。
+  - D：转载、自媒体、聚合站、内容不完整来源。
+  - 输出 `source_level_reason`。
+- 新增 `pwg_intelligence/pwg_scoring.py`
+  - 自动判断成熟度 M0-M7。
+  - 明确限制：论文最高 M1、专利最高 M2、概念图/概念材料不得直接判断为量产。
+  - 计算 100 分机会评分：
+    - 客户痛点 30
+    - FPC能力匹配 25
+    - 公开产品证据 20
+    - 技术可实现性 15
+    - 竞争可进入性 10
+  - 输出 `scoring_reason`。
+- 更新 `pwg_intelligence/collector.py`
+  - raw 结果通过基础过滤后，进入分类、来源等级、成熟度和机会评分。
+  - 默认丢弃 D 级来源；如果整批没有 A-C 来源，则保留 D 级作为低可信线索，并强制 `needs_manual_review=true`。
+  - JSON 输出新增：
+    - `classified_rows`
+    - `rule_coverage`
+    - `manual_review_list`
+  - 默认将分类/评分后的保留结果写入 `data/pwg_intelligence/pwg_intelligence.xlsx`。
+  - 新增 CLI：
+    - `--workbook-path`
+    - `--no-workbook`
+    - `--drop-all-d`
+- 更新 `pwg_intelligence/models.py` 和 `pwg_intelligence/excel_store.py`
+  - `daily_intelligence` 新增字段：
+    - `pwg_category`
+    - `opportunity_score`
+    - `scoring_reason`
+    - `needs_manual_review`
+    - `classification_reason`
+    - `source_level_reason`
+    - `maturity_reason`
+  - 重新生成 `data/pwg_intelligence/pwg_intelligence.xlsx`，保留 DEMO 数据并包含第四阶段字段。
+- 更新 `docs/PWG_INTELLIGENCE_GUIDE_CN.md`
+  - 增加第四阶段分类、来源等级、成熟度、机会评分和人工复核说明。
+- 更新 `PLANS.md`
+  - 标记第四阶段规则分类、评分和主工作簿写入已完成。
+- 新增 `tests/test_pwg_phase4_rules.py`
+  - 覆盖九类分类。
+  - 覆盖 A-D 来源等级。
+  - 覆盖论文/专利/概念不能直接判量产。
+  - 覆盖机会评分五个分项和 `scoring_reason`。
+  - 覆盖 D 级默认丢弃和低可信 fallback。
+  - 覆盖分类结果写入 `pwg_intelligence.xlsx`。
+
+已执行验证：
+- `python tests\test_pwg_phase4_rules.py`
+- `python tests\test_pwg_collector.py`
+- `python tests\test_pwg_intelligence_phase1.py`
+- `python tests\test_pwg_query_packs.py`
+- `python -m py_compile pwg_intelligence\classifier.py pwg_intelligence\pwg_source_policy.py pwg_intelligence\pwg_scoring.py pwg_intelligence\collector.py pwg_intelligence\excel_store.py pwg_intelligence\models.py tests\test_pwg_phase4_rules.py tests\test_pwg_collector.py`
+- `python -m pwg_intelligence.collector --mode daily_scan --dry-run --max-queries 3`
+- `python -m pwg_intelligence.excel_store`
+
+待完成：
+- 尚未执行真实 Exa/Tavily 搜索后的第四阶段入库验证。
+- 尚未接入 crawler 获取正文，当前分类和评分基于标题、摘要、URL、来源名称和 query。
+- 尚未把评分权重迁移为 YAML 配置。
+- 尚未实现正式 Excel 增量 upsert；当前写入主工作簿会用 DEMO 骨架加本轮分类行重建工作簿。
+- 尚未接入 Streamlit 频道四入口。
+
+## 0F. 2026-06-09 更新：频道四 PWG 第三阶段每日搜索与原始结果入库
+
+本次继续保持频道四独立开发；没有修改 `agent_app.py`，没有修改频道一、频道二、频道三流程，也没有改 `tools/search_engine.py` 的既有行为。第三阶段仅新增 PWG raw collector，复用现有 `search_web()`。
+
+已完成：
+- 新增 `pwg_intelligence/collector.py`
+  - 当前支持 `daily_scan` 模式。
+  - 默认 `lookback_days=7`，调用搜索时使用 `timelimit=w`，不是只看当天。
+  - 默认输出目录：`data/pwg_intelligence/raw/`。
+  - 输出 `daily_scan_YYYY-MM-DD.json` 和 `daily_scan_YYYY-MM-DD.xlsx`；若同日文件已存在且未传 `--overwrite`，自动追加时间后缀，避免覆盖上一轮原始结果。
+  - 每条保留记录包含：`query`、`title`、`url`、`source_name`、`published_date`、`snippet`、`fetched_at`、`search_provider`。
+  - 第一版不调用大模型，不生成长摘要，不写入 `daily_intelligence` 正式情报卡。
+- 过滤逻辑：
+  - URL 规范化：去除 fragment、常见 `utm_*`、`fbclid`、`gclid` 等 tracking 参数。
+  - URL 去重。
+  - 标题去重。
+  - 域名去重：每个域名默认保留首条通过过滤的结果。
+  - 时间过滤：默认保留最近 7 天结果，允许未来 6 小时容忍；缺少可解析发布时间的结果会被剔除。
+  - 明显无关过滤：依据 PWG YAML 配置中的关键词、公司、应用场景、标准引用和 query token 判断。
+- 命令行入口：
+  - `python -m pwg_intelligence.collector --mode daily_scan`
+  - `python -m pwg_intelligence.collector --mode daily_scan --dry-run --max-queries 5`
+  - `--provider` 支持 `exa`、`tavily`、`hybrid`。
+  - `--exa-key` 默认读取 `EXA_API_KEY`；`--tavily-key` 默认读取 `TAVILY_API_KEY`。
+- 更新 `docs/PWG_INTELLIGENCE_GUIDE_CN.md`
+  - 增加第三阶段运行命令、输出字段、过滤规则和注意事项。
+- 更新 `PLANS.md`
+  - 标记 PWG `daily_scan` raw collection、基础过滤、CLI 与 dry-run 已完成。
+- 新增 `tests/test_pwg_collector.py`
+  - 验证 URL 规范化。
+  - 验证标题/域名/时间/无关结果过滤。
+  - 验证 dry-run 不调用搜索函数。
+  - 验证本地 fake search 可写出 JSON 和 XLSX，且字段完整。
+
+已执行验证：
+- `python tests\test_pwg_collector.py`
+- `python -m pwg_intelligence.collector --mode daily_scan --dry-run --max-queries 3`
+- `python -m py_compile pwg_intelligence\collector.py tools\pwg_query_packs.py pwg_intelligence\models.py pwg_intelligence\excel_store.py tests\test_pwg_collector.py tests\test_pwg_query_packs.py tests\test_pwg_intelligence_phase1.py`
+
+待完成：
+- 尚未执行真实 Exa/Tavily 搜索写入 raw 目录；本次只做本地 fake search 与 dry-run 验证。
+- 尚未扩展到 `weekly_deep_scan`、`company_watch`、`standard_watch`、`patent_watch`、`paper_watch` 采集。
+- 尚未接入 crawler 获取正文。
+- 尚未实现 PWG 来源评分、机会评分、结构化抽取 agent、正式 Excel upsert 和 Streamlit 频道四入口。
+
+## 0E. 2026-06-09 更新：频道四 PWG 第二阶段关键词矩阵、公司与应用配置
+
+本次继续保持频道四独立开发；没有修改 `agent_app.py`，没有接入现有频道一、频道二、频道三流程，也没有改搜索引擎、PPT/Word 导出、金融补链或 `tools/report_linker.py`。
+
+已完成：
+- 新增三份面向非程序人员维护的 YAML 配置：
+  - `pwg_intelligence/config/keywords.yaml`
+    - 分类包含核心术语、接口与连接器、车载应用、数据中心与 CPO、材料与工艺。
+    - 包含 `daily_scan`、`weekly_deep_scan`、`company_watch`、`standard_watch`、`patent_watch`、`paper_watch` 六种模式的 `query_templates`。
+    - 包含 `placeholder_groups`，用于把模板占位符映射到关键词类别。
+  - `pwg_intelligence/config/companies.yaml`
+    - 覆盖 Hakusan、Sumitomo Bakelite、Sumitomo Electric、Yazaki、Molex、Amphenol、TE Connectivity、Aptiv、Leoni、Broadcom、Marvell。
+    - 增加国内光模块、光器件、PCB、FPC、封装企业示例，包括中际旭创、新易盛、光迅科技、天孚通信、鹏鼎控股、东山精密、深南电路、沪电股份、胜宏科技、长电科技、通富微电、华天科技等。
+  - `pwg_intelligence/config/application_map.yaml`
+    - 覆盖车载 ECU 板边接口、Camera 输出链路、Display 链路、车载光线束分支节点、光模块内光路重排、PMT/MPO/MT 接口件、45 度微镜与 90 度转向、CPO 供光、PIC 到 FA 扇出、optical RDL、光电混合 FPC。
+- 新增 `tools/pwg_query_packs.py`
+  - 从 YAML 读取关键词、公司、应用场景和 query 模板。
+  - 输出 `PWGQueryRecord` 查询记录。
+  - 支持公司过滤和应用场景过滤。
+  - 提供 CLI 示例输出：`python -m tools.pwg_query_packs --limit 5`。
+- 更新 `docs/PWG_INTELLIGENCE_GUIDE_CN.md`
+  - 增加第二阶段 YAML 配置、支持模式和维护说明。
+- 更新 `PLANS.md`
+  - 标记第二阶段关键词矩阵、公司配置、应用配置和 query pack 已完成。
+- `requirements.txt` 增加 `pyyaml`，用于读取 YAML；本地环境已检测可用。
+- 新增 `tests/test_pwg_query_packs.py`
+  - 验证必需关键词、公司、应用场景存在。
+  - 验证六种 query mode 均可生成查询。
+  - 验证公司和应用过滤有效。
+  - 验证临时修改 YAML 中的唯一关键词会进入生成 query，确保逻辑配置驱动而非关键词硬编码。
+
+待执行/待完成：
+- 尚未接入真实搜索 pipeline。
+- 尚未实现 PWG 来源评分、机会评分、结构化抽取和 Excel 增量写入。
+- 尚未接入 Streamlit 频道四 UI。
+
+## 0D. 2026-06-09 更新：频道四 PWG 情报系统第一阶段数据模型和 Excel 骨架
+
+本次按“独立模块、最小接入面”实现频道四第一阶段；没有修改频道一、频道二、频道三流程，没有改 `agent_app.py`、搜索引擎、PPT/Word 导出、金融补链或 `tools/report_linker.py`。
+
+已完成：
+- 新增 `pwg_intelligence/` 独立模块。
+  - `models.py`：新增标准化情报卡模型 `PWGIntelligenceCard`。
+  - `excel_store.py`：定义 Excel 工作表 schema、DEMO 演示数据和 `create_pwg_intelligence_workbook()`。
+  - `__init__.py`：仅导出 PWG 模型常量，避免运行 Excel 生成模块时触发导入副作用。
+- 新增 Excel 数据库骨架：
+  - `data/pwg_intelligence/pwg_intelligence.xlsx`
+  - 工作表：`daily_intelligence`、`companies`、`opportunities`、`standards`、`keyword_library`。
+  - 每个工作表均包含 3-5 条 `DEMO` 演示数据。
+  - `daily_intelligence` 包含 `card_id`、`published_date`、`event_date`、`collected_at`、`source_type`、`source_level`、`source_name`、`title`、`source_url`、`original_language`、`main_track`、`application_scene`、`keywords`、`factual_summary`、`key_parameters`、`maturity_level`、`evidence_strength`、`fpc_relevance`、`recommended_action`、`owner`、`next_review_date`、`demo_flag`。
+- 新增中文字段指南：
+  - `docs/PWG_INTELLIGENCE_GUIDE_CN.md`
+  - 解释 daily_intelligence 字段、`M0-M7` 成熟度等级、`A-D` 来源等级，以及其余四个工作表用途。
+- 新增 `PLANS.md`，记录频道四第一阶段完成项和后续阶段任务。
+- `requirements.txt` 补充 `xlsxwriter`，用于生成 `.xlsx` 文件；本地环境已存在该库。
+- 新增最小测试：
+  - `tests/test_pwg_intelligence_phase1.py`
+  - 使用标准库解析 `.xlsx` 内部 XML，不依赖 `pytest` 或 `openpyxl`。
+
+已执行验证：
+- `python -m pwg_intelligence.excel_store`
+- `python -m py_compile pwg_intelligence\__init__.py pwg_intelligence\models.py pwg_intelligence\excel_store.py tests\test_pwg_intelligence_phase1.py`
+- `python tests\test_pwg_intelligence_phase1.py`
+
+验证结果：
+- 新增测试 3 项通过：
+  - `PWGIntelligenceCard` 接受合法 `source_level=A-D`、`maturity_level=M0-M7`，拒绝非法等级。
+  - DEMO payload 覆盖五个工作表，且每个工作表 3-5 条 DEMO 数据。
+  - 生成的 Excel 包含五个要求工作表、daily_intelligence 必需字段、DEMO 标记、合法来源等级和成熟度等级。
+
+未完成：
+- 尚未接入 Streamlit 频道四 UI。
+- 尚未实现真实检索、PWG 来源评分、机会评分、增量写入和去重。
+- 尚未执行真实 API 验证；第一阶段仅为模型与 Excel 骨架。
+
 ## 0C. 2026-06-09 更新：修复时间线免责声明摘要、来源质量门禁和详细新闻有效性
 
 本次检查了新闻检索、来源排序、时间线摘要、详细新闻生成、标题二次审查和 Streamlit HTML 预览输出链路。页面整体结构保持不变，仅在核心时间线卡片中补充展示已有 `event_summary`。

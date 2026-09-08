@@ -1,0 +1,92 @@
+[
+  {
+    "file": "tests\\test_channel1_news_cleanup_and_title_gate.py",
+    "code": 0,
+    "output": "PASS test_patch_lines_are_removed_and_section_titles_are_kept\nPASS test_expand_short_summary_does_not_append_supporting_results\nPASS test_title_gate_keeps_matching_fresh_news\nPASS test_title_gate_keeps_same_url_when_translated_title_differs\nPASS test_title_gate_drops_no_results_missing_time_stale_future_and_mismatch\nPASS test_channel1_static_order_does_not_refill_after_title_gate\nPASS test_source_quality_filters_low_quality_results\nPASS test_finalize_news_drops_disclaimer_and_invalid_items\n"
+  },
+  {
+    "file": "tests\\test_channel1_reference_optimization.py",
+    "code": 0,
+    "output": "PASS test_all_ten_topics_have_specific_content_profiles\nPASS test_deep_news_event_id_backfill_prefers_normalized_source_url\nPASS test_report_linker_uses_url_then_validated_event_id_and_is_one_to_one\nPASS test_ppt_shows_numbered_mapping_and_two_highlight_levels\n"
+  },
+  {
+    "file": "tests\\test_channel1_timeline_summary.py",
+    "code": 0,
+    "output": "PASS test_normal_search_content_builds_complete_summary\nPASS test_summary_selects_event_specific_sentences_instead_of_first_sentences\nPASS test_summary_cleaner_removes_noise_and_patch_lines\nPASS test_empty_material_returns_no_summary\nPASS test_english_result_does_not_replace_chinese_event_summary\nPASS test_disclaimer_summary_is_rejected\nPASS test_merge_keeps_better_summary_without_concatenating\nPASS test_ppt_timeline_summaries_pagination_and_link_prompt\nPASS test_fake_ai_blueprint_summary_flows_to_timeline_and_ppt\nPASS test_company_tracking_marker_is_only_in_channel1_block\n"
+  },
+  {
+    "file": "tests\\test_company_strategy.py",
+    "code": 0,
+    "output": "...........\n----------------------------------------------------------------------\nRan 11 tests in 0.348s\n\nOK\n"
+  },
+  {
+    "file": "tests\\test_consumer_daily_channel1_pipeline.py",
+    "code": 0,
+    "output": "PASS test_six_topic_packs_load\nPASS test_channel3_uses_five_major_news_topic_packs\nPASS test_each_topic_pack_generates_at_least_ten_queries\nPASS test_robotics_topic_pack_has_china_weighted_breadth_queries\nPASS test_channel3_exa_only_requires_exa_key\nPASS test_collect_consumer_topic_search_uses_exa_only\nPASS test_consumer_topic_freshness_filter_rejects_old_news\nPASS test_channel3_page_date_review_overrides_wrong_provider_timestamp\nPASS test_event_master_can_be_generated_from_topic_results\nPASS test_map_reduce_fallback_outputs_structured_event_news\nPASS test_weak_only_stays_watchlist_not_main_news\nPASS test_stale_event_is_not_formal_news\nPASS test_verified_package_is_deepseek_input_not_raw_cards\nPASS test_agent_app_channel3_pipeline_static_contract\n"
+  },
+  {
+    "file": "tests\\test_consumer_daily_exa_breadth.py",
+    "code": 0,
+    "output": "PASS test_consumer_daily_exa_only_does_not_fallback_to_tavily\nPASS test_wide_query_builder_generates_layered_exa_queries\nPASS test_robotics_legacy_topic_generates_china_and_supply_chain_queries\nPASS test_expand_exa_queries_for_topic_has_media_and_supply_chain_terms\nPASS test_discovery_keeps_candidate_without_required_terms_until_validation\nPASS test_exa_expansion_can_reach_three_main_events\nPASS test_old_news_from_exa_expansion_is_rejected_not_filled\nPASS test_36kr_single_source_is_hard_blocked\nPASS test_ai_topic_defaults_to_week_window_and_deepseek_material_is_verified\n"
+  },
+  {
+    "file": "tests\\test_consumer_daily_validation.py",
+    "code": 0,
+    "output": "PASS test_36kr_single_source_is_not_formal\nPASS test_36kr_reprints_count_as_not_independent\nPASS test_official_vertical_and_mainstream_confirm_event\nPASS test_today_page_with_old_event_is_stale\nPASS test_ar_topic_rejects_foldable_iphone_noise\nPASS test_same_event_clusters_once_and_enters_deepseek_package\nPASS test_verified_digest_summary_is_factual_chinese_without_disclaimer\nPASS test_china_focused_topic_downgrades_global_only_event\nPASS test_domestic_media_translation_is_not_domestic_event_evidence\nPASS test_registered_vertical_media_is_trusted_and_unknown_mirrors_do_not_count\nPASS test_page_verified_registered_vertical_source_can_be_likely\nPASS test_generic_ai_glasses_terms_do_not_merge_different_company_events\nPASS test_multi_source_rumor_and_forecast_roundup_never_become_formal_news\nPASS test_event_uses_published_date_for_future_scheduled_launch_and_chinese_title\nPASS test_topic_output_keeps_three_confirmed_without_watchlist\nPASS test_topic_output_uses_likely_to_reach_main_news_count\nPASS test_topic_output_adds_watchlist_when_main_news_still_low\nPASS test_auto_expansion_adds_events_before_watchlist\nPASS test_36kr_single_source_is_hard_blocked\nPASS test_expanded_old_news_is_not_used_to_fill_count\n"
+  },
+  {
+    "file": "tests\\test_finance_engine.py",
+    "code": 0,
+    "output": "finance engine tests passed: 6\n"
+  },
+  {
+    "file": "tests\\test_finance_ppt_output.py",
+    "code": 0,
+    "output": "finance PPT output test passed: E:\\Users\\zwz10\\PycharmProjects\\collectNews\\collectNews-main\\validation_outputs\\finance_analysis_stub\\finance_analysis_stub.pptx\n"
+  },
+  {
+    "file": "tests\\test_publication_date_validation.py",
+    "code": 0,
+    "output": "publication date validation tests passed: 5\n"
+  },
+  {
+    "file": "tests\\test_pwg_collector.py",
+    "code": 0,
+    "output": "PASS test_normalize_pwg_url_removes_tracking_and_fragments\nPASS test_filter_pwg_raw_results_dedupes_and_filters\nPASS test_collect_pwg_daily_scan_dry_run_does_not_call_search\nPASS test_collect_pwg_daily_scan_writes_json_and_xlsx_outputs\nPASS test_collect_pwg_daily_scan_reports_empty_filtered_result\n"
+  },
+  {
+    "file": "tests\\test_pwg_intelligence_phase1.py",
+    "code": 0,
+    "output": "PASS test_pwg_intelligence_card_validates_levels\nPASS test_demo_payload_has_required_sheets_and_demo_rows\nPASS test_create_pwg_intelligence_workbook\n"
+  },
+  {
+    "file": "tests\\test_pwg_phase4_rules.py",
+    "code": 0,
+    "output": "PASS test_classifier_covers_required_categories\nPASS test_source_policy_assigns_a_to_d_levels\nPASS test_maturity_caps_paper_patent_and_concept_sources\nPASS test_opportunity_score_has_reason_and_components\nPASS test_classify_and_score_drops_d_by_default_and_keeps_low_trust_fallback\nPASS test_classified_rows_are_written_to_pwg_workbook\n"
+  },
+  {
+    "file": "tests\\test_pwg_query_packs.py",
+    "code": 0,
+    "output": "PASS test_pwg_yaml_configs_include_required_terms_companies_and_applications\nPASS test_pwg_query_pack_supports_all_required_modes\nPASS test_company_and_application_filters_are_applied\nPASS test_query_generation_is_config_driven\nPASS test_example_queries_cover_all_modes\n"
+  },
+  {
+    "file": "tests\\test_pwg_reports.py",
+    "code": 0,
+    "output": "PASS test_daily_brief_filters_dedupes_and_omits_empty_sections\nPASS test_daily_brief_writes_expected_filename\nPASS test_report_writers_filter_builtin_and_manual_blocked_sources\nPASS test_weekly_review_dedupes_limits_and_includes_required_sections\nPASS test_weekly_opportunity_rows_and_workbook_update\nPASS test_load_recent_classified_rows_reads_week_window_json_files\n"
+  },
+  {
+    "file": "tests\\test_qwen_llm_driver.py",
+    "code": 0,
+    "output": "PASS test_openrouter_defaults_endpoint_normalization_and_arbitrary_model_options\nPASS test_openrouter_catalog_parses_capabilities_and_filters_non_text_models\nPASS test_capability_aware_structured_request_and_output_limit_clamp\nAI request compatibility retry for OpenRouter/vendor/strict-model: disabled unsupported parameter structured_outputs.\nPASS test_strict_structured_output_is_preferred_then_falls_back_to_json_mode\nPASS test_known_limited_model_omits_unsupported_parameters_without_retry\nAI request compatibility retry for OpenRouter/vendor/catalog-miss-model: disabled unsupported parameter response_format.\nPASS test_unknown_model_retries_without_rejected_response_format\nAI request compatibility retry for OpenRouter/vendor/another-model: disabled unsupported parameter reasoning.\nPASS test_unknown_model_retries_without_rejected_reasoning\nPASS test_auto_reasoning_omits_reasoning_parameter_and_xhigh_is_accepted\nPASS test_deepseek_provider_stays_disabled_even_with_explicit_base_url\nPASS test_frontend_and_outputs_are_openrouter_model_neutral\nPASS test_streamlit_uses_server_secrets_fixed_endpoint_and_openrouter_only_ui\n"
+  },
+  {
+    "file": "tests\\test_source_blocklist.py",
+    "code": 0,
+    "output": "source blocklist tests passed: 10\n"
+  },
+  {
+    "file": "tests\\test_strain_gauge_module.py",
+    "code": 0,
+    "output": "PASS test_query_config_contains_required_terms_and_modes\nPASS test_collect_strain_gauge_module_with_stub_outputs_required_counts\nPASS test_report_has_required_sections_and_no_banned_template_text\nPASS test_quantity_validator_reports_shortage_without_silent_skip\nPASS test_exa_long_windows_use_explicit_publication_boundaries\n"
+  }
+]
