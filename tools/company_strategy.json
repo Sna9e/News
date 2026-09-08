@@ -1,0 +1,42 @@
+{
+  "companies": {
+    "Nvidia": {"name": "NVIDIA（英伟达）", "domains": ["nvidia.com"], "terms": ["GPU", "NVLink", "CPO", "robotics", "HBM", "advanced packaging"]},
+    "Microsoft": {"name": "Microsoft（微软）", "domains": ["microsoft.com"], "ir_domains": ["microsoft.com"], "terms": ["Azure AI", "Maia", "CapEx", "data center", "AI ASIC"],
+      "aliases": ["Microsoft", "微软", "MSFT", "Azure", "Maia"],
+      "summary_focus": ["Azure AI与自研ASIC的产品代际变化", "数据中心资本投入的期间与租赁口径", "客户部署和商业化证据", "供电、液冷与高速网络的供应链传导"],
+      "high_value_signals": ["重大产品发布", "客户部署", "资本支出指引变更", "量产交付", "新增产能", "芯片路线更新"],
+      "queries": ["{topic} Azure AI Maia data center latest", "{topic} earnings CapEx guidance latest", "{topic} AI infrastructure network cooling latest", "{topic} custom ASIC server deployment latest", "{topic} 微软 云计算 自研芯片 客户部署", "{topic} 数据中心 液冷 供电 网络", "{topic} 资本支出 财报 指引", "{topic} AI PC Copilot hardware launch"]},
+    "Google": {"name": "Alphabet（谷歌母公司）", "domains": ["abc.xyz", "blog.google", "google.com", "waymo.com"], "ir_domains": ["abc.xyz"], "terms": ["TPU", "Gemini", "Cloud", "Waymo", "CapEx", "data center"]},
+    "Amazon": {"name": "Amazon（亚马逊）", "domains": ["amazon.com", "aboutamazon.com"], "ir_domains": ["ir.aboutamazon.com"], "terms": ["AWS", "Trainium", "robotics", "data center", "CapEx"]},
+    "Meta": {"name": "Meta", "domains": ["meta.com", "fb.com", "atmeta.com"], "ir_domains": ["investor.atmeta.com"], "terms": ["MTIA", "AI glasses", "Reality Labs", "CapEx", "AI infrastructure"]},
+    "Apple": {"name": "Apple（苹果）", "domains": ["apple.com"], "terms": ["Apple Intelligence", "silicon", "AR", "smart glasses", "hardware", "mass production"]},
+    "Tesla": {"name": "Tesla（特斯拉）", "domains": ["tesla.com"], "terms": ["Robotaxi", "FSD", "Optimus", "energy", "AI infrastructure", "mass production"]}
+  },
+  "source_levels": {
+    "A": ["sec.gov", "nist.gov", "europa.eu", "whitehouse.gov", "iec.ch", "iso.org", "openai.com", "anthropic.com", "spacex.com"],
+    "B": ["reuters.com", "bloomberg.com", "ft.com", "ieee.org", "ofcconference.org", "ecoc2026.org"],
+    "C": ["semianalysis.com", "anandtech.com", "servethehome.com", "lightreading.com", "eetimes.com", "digitimes.com"],
+    "E": ["x.com", "twitter.com", "reddit.com", "weibo.com"]
+  },
+  "non_editorial_hosts": ["podcasts.apple.com", "discussions.apple.com", "discussions-cn-prz.apple.com", "answers.microsoft.com", "techcommunity.microsoft.com", "groups.google.com", "sites.google.com", "docs.google.com"],
+  "non_editorial_paths": {"learn.microsoft.com": ["/answers/"]},
+  "trends": {
+    "AI算力": ["GPU", "AI compute", "AI infrastructure", "AI算力"],
+    "ASIC（专用集成电路）": ["ASIC", "TPU", "Trainium", "Maia", "MTIA"],
+    "HBM（高带宽存储器）/先进封装": ["HBM", "CoWoS", "advanced packaging", "先进封装"],
+    "高速光互连": ["1.6T", "CPO", "Optical I/O", "silicon photonics"],
+    "数据中心供电与散热": ["liquid cooling", "HVDC", "data center power", "液冷"],
+    "具身智能/机器人": ["robotics", "Optimus", "humanoid", "机器人"],
+    "AI眼镜/增强现实": ["AI glasses", "smart glasses", "Reality Labs", "AI眼镜"]
+  },
+  "glossary": {
+    "CapEx": "资本支出", "ASIC": "专用集成电路", "HBM": "高带宽存储器", "CPO": "共封装光学",
+    "LPO": "线性可插拔光模块", "Optical I/O": "光学输入/输出", "Silicon Photonics": "硅光",
+    "Chiplet": "芯粒", "Liquid Cooling": "液冷", "HVDC": "高压直流", "Guidance": "公司指引",
+    "Hyperscaler": "超大规模云服务商", "Scale-up": "节点内部高速互连", "Scale-out": "节点间横向扩展网络"
+  },
+  "strategy_days": 30,
+  "capex_days": 150,
+  "max_sources_per_company": 4,
+  "max_ir_sources_per_company": 2
+}
